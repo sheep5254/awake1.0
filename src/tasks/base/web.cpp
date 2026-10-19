@@ -4,8 +4,13 @@
 #include "tasks/auto_buff/type.hpp"
 #include "utils/common/type_common.hpp"
 #include "utils/utils.hpp"
+#include <algorithm>
 #include <array>
+#include <chrono>
+#include <cmath>
+#include <limits>
 #include <memory>
+#include <vector>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core/types.hpp>
 #include <opencv2/imgproc.hpp>
@@ -197,6 +202,9 @@ struct Web::Impl {
             target_state.predict(ctx.img_frame.get().timestamp, armor_target.target_number);
             auto armors_pose_in_odom = target_state.get_armors_pose(armor_target.target_number);
             auto odom_in_camera_cv = ctx.odom_in_camera_cv.get();
+            // 每块预测装甲板的中心像素/深度：给下面"准星吸附"用
+            std::vector<cv::Point2f> plate_centers;
+            std::vector<double> plate_depths;
             for (int i = 0; i < armors_pose_in_odom.size(); ++i) {
                 auto& armor_pose_in_camera_cv = odom_in_camera_cv * armors_pose_in_odom[i];
                 if (armor_pose_in_camera_cv.translation().z() > 0.1) {
@@ -218,13 +226,47 @@ struct Web::Impl {
                     draw_line(I::LEFT_BOTTOM, I::RIGHT_BOTTOM);
                     draw_line(I::RIGHT_BOTTOM, I::RIGHT_TOP);
                     draw_line(I::RIGHT_TOP, I::LEFT_TOP);
+                    plate_centers.push_back(
+                        0.25f
+                        * (image_points[I::LEFT_TOP] + image_points[I::RIGHT_TOP]
+                           + image_points[I::RIGHT_BOTTOM] + image_points[I::LEFT_BOTTOM])
+                    );
+                    plate_depths.push_back(armor_pose_in_camera_cv.translation().z());
                 }
             }
             {
+                // 显示专用：车中心高度做一阶低通（τ=0.4s）。状态里的 CZ 会被装甲板姿态
+                // 带得抖 ±0.3m（armor PnP 的深度偏置），直接画出来就是目标中心的"十字"/
+                // 箭头上下飘（实测 ±35px/帧）。只影响 debug 绘制，控制和解算仍用原始状态。
+                static double z_disp = 0.0;
+                static bool z_disp_valid = false;
+                static TimePoint z_disp_tp {};
+                {
+                    const auto now_disp = Clock::now();
+                    double dt_disp = 0.02;
+                    if (z_disp_valid) {
+                        dt_disp = std::chrono::duration<double>(now_disp - z_disp_tp).count();
+                    }
+                    dt_disp = std::clamp(dt_disp, 0.001, 0.2);
+                    constexpr double Z_DISP_TAU = 0.4;
+                    const double z_now = target_state.pos().z();
+                    if (z_disp_valid) {
+                        z_disp += dt_disp / (Z_DISP_TAU + dt_disp) * (z_now - z_disp);
+                    } else {
+                        z_disp = z_now;
+                        z_disp_valid = true;
+                    }
+                    z_disp_tp = now_disp;
+                }
                 auto center_pose = ISO3::Identity();
                 center_pose.translation() = target_state.pos();
+                center_pose.translation().z() = z_disp;
                 auto vel_pose = center_pose;
-                vel_pose.translation() += target_state.vel();
+                // 显示用：运动模型没有竖直速度状态，vel().z() 是数值噪声（实测 ±0.5m/s），
+                // 带着画会让速度箭头上下扑腾。这里把竖直分量置零。
+                auto vel_disp = target_state.vel();
+                vel_disp.z() = 0.0;
+                vel_pose.translation() += vel_disp;
                 center_pose = odom_in_camera_cv * center_pose;
                 vel_pose = odom_in_camera_cv * vel_pose;
                 auto center_image_points = utils::reprojection(
@@ -243,6 +285,7 @@ struct Web::Impl {
                     target_state.x.data(),
                     armor_target.target_number
                 );
+                whole_car_pose.translation().z() = z_disp;
                 auto vyaw_in_car = ISO3::Identity();
                 vyaw_in_car.translation().z() = target_state.vyaw() / 10.0;
                 auto vyaw_pose = odom_in_camera_cv * whole_car_pose * vyaw_in_car;
@@ -298,7 +341,7 @@ struct Web::Impl {
                 );
                 cv::putText(
                     img,
-                    fmt::format("V_norm: {:.2f}", target_state.vel().norm()),
+                    fmt::format("V_norm: {:.2f}", std::hypot(vel_disp.x(), vel_disp.y())),
                     center + cv::Point2f(0, -120),
                     cv::FONT_HERSHEY_SIMPLEX,
                     1.0,
@@ -314,9 +357,25 @@ struct Web::Impl {
                     cmd.aim_point.pose
                 );
                 constexpr double R = 0.02;
+                // 准星不再画在 cmd.aim_point 上：那个点是"击发时刻"的未来点，其高度/深度
+                // 来自状态估计，逐帧抖 ±35px，画出来就是准星相对装甲板上下飘。
+                // 这里吸附到最近的"预测装甲板中心"——预测框和检测的误差只有 ±2px，稳。
                 cv::Point2f center = aim_point_img_points[0];
-                double r = camera_info.camera_matrix.at<double>(0, 0) * R
-                    / cmd.aim_point.pose.translation().z();
+                double depth = cmd.aim_point.pose.translation().z();
+                if (!plate_centers.empty()) {
+                    std::size_t best = 0;
+                    double best_dis = std::numeric_limits<double>::max();
+                    for (std::size_t i = 0; i < plate_centers.size(); ++i) {
+                        const double dis = cv::norm(plate_centers[i] - center);
+                        if (dis < best_dis) {
+                            best_dis = dis;
+                            best = i;
+                        }
+                    }
+                    center = plate_centers[best];
+                    depth = plate_depths[best];
+                }
+                double r = camera_info.camera_matrix.at<double>(0, 0) * R / depth;
                 cv::circle(img, center, r, cv::Scalar(50, 50, 255), 2);
                 // if (cmd.fire_advice) {
                 //     int size = 50;
@@ -340,8 +399,16 @@ struct Web::Impl {
                 const double v_yaw = cmd.v_yaw;
                 const double v_pitch = cmd.v_pitch;
 
-                const double dx = -scale * v_yaw;
-                const double dy = -scale * v_pitch;
+                double dx = -scale * v_yaw;
+                double dy = -scale * v_pitch;
+                // 限长：|v_pitch| p99 有 50°/s，×10 会画出上千像素、满屏乱甩的箭头。
+                // 只保留方向信息，长度封顶 80px。
+                constexpr double MAX_ARROW_PX = 80.0;
+                const double arrow_len = std::hypot(dx, dy);
+                if (arrow_len > MAX_ARROW_PX) {
+                    dx *= MAX_ARROW_PX / arrow_len;
+                    dy *= MAX_ARROW_PX / arrow_len;
+                }
 
                 const cv::Point2f start_pt = center;
                 const cv::Point2f end_pt = start_pt + cv::Point2f(dx, dy);
