@@ -4,7 +4,6 @@
 #include "tasks/base/web.hpp"
 #include "utils/logger.hpp"
 #include <algorithm>
-#include <atomic>
 #include <cstddef>
 #include <cstdlib>
 #include <future>
@@ -91,12 +90,6 @@ struct ArmorDetector::Impl {
         }
     };
     mutable Params params_;
-
-    // 诊断计数（读取后清零）
-    mutable std::atomic<int> stat_net_empty_ { 0 };
-    mutable std::atomic<int> stat_extract_fail_ { 0 };
-    mutable std::atomic<int> stat_out_ { 0 };
-
     Impl(const YAML::Node& config) {
         params_.load(config);
         if (params_.number_classifier_params) {
@@ -363,18 +356,6 @@ struct ArmorDetector::Impl {
             } else {
                 armor->number_classifier->number = ArmorClass::UNKNOWN;
             }
-
-            // 诊断（每秒日志打印）：同一块板的两种号码来源对比。
-            // 只统计 E2E 检测路径（cv 路径没有 net，号码只有分类器一个来源）。
-            if (armor->net) {
-                auto& ns = number_source_stats();
-                ns.pair[std::to_underlying(armor->net->number)]
-                       [std::to_underlying(armor->number_classifier->number)] += 1;
-                if (armor->number_classifier->number == ArmorClass::UNKNOWN) {
-                    ns.clf_unknown += 1;
-                }
-                ns.total += 1;
-            }
         }
 
         return true;
@@ -627,7 +608,6 @@ struct ArmorDetector::Impl {
 
         net_output = net_detector_->detect(roi, frame.img_frame.format);
         if (net_output.outputs.empty()) {
-            stat_net_empty_.fetch_add(1, std::memory_order_relaxed);
             return { lights, result };
         }
         result = armor_infer_->process(net_output.outputs.front());
@@ -639,8 +619,6 @@ struct ArmorDetector::Impl {
                 for (auto& armor: result) {
                     if (extract_number(net_output.resized_img, armor)) {
                         batch_armors.push_back(&armor);
-                    } else {
-                        stat_extract_fail_.fetch_add(1, std::memory_order_relaxed);
                     }
                 }
                 classify_number_batch(batch_armors);
@@ -701,7 +679,6 @@ struct ArmorDetector::Impl {
             }
         }
 
-        stat_out_.fetch_add(static_cast<int>(result.size()), std::memory_order_relaxed);
         return { std::move(lights), std::move(result) };
     }
     bool is_armor(const Armor& armor
@@ -798,17 +775,5 @@ std::tuple<std::vector<Light>, std::vector<Armor>> ArmorDetector::detect(
 }
 double ArmorDetector::get_net_wh_ratio() const noexcept {
     return _impl->get_net_wh_ratio();
-}
-ArmorDetector::DetectStats ArmorDetector::take_detect_stats() const {
-    DetectStats s;
-    s.net_empty = _impl->stat_net_empty_.exchange(0, std::memory_order_relaxed);
-    s.extract_fail = _impl->stat_extract_fail_.exchange(0, std::memory_order_relaxed);
-    s.out = _impl->stat_out_.exchange(0, std::memory_order_relaxed);
-    if (_impl->armor_infer_) {
-        const auto infer_stats = _impl->armor_infer_->take_stats();
-        s.over_conf = infer_stats.over_conf;
-        s.kept = infer_stats.kept;
-    }
-    return s;
 }
 } // namespace awakening::auto_aim

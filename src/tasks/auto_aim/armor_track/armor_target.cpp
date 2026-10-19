@@ -449,7 +449,11 @@ int ArmorTarget::update(
                     auto r_sigma = cfg.r_sigma_armor_lights_depth_diff;
                     // / std::abs(z[0] / getArmorWH(target_number).first); //实际触发到这里的情况深度差都不大，这么映射太猛了
                     r(0, 0) = r_sigma * r_sigma / 2.0;
-                    // DIFFZ_N == 1：1x1 矩阵写 r(1,1) 是越界写（原版此行越界，此处保留修复）
+                    // 【修源码 bug】DIFFZ_N == 1，r 是 1x1 矩阵：原版这里还有一行
+                    //   r(1, 1) = r_sigma * r_sigma / 2.0;
+                    // 对 1x1 矩阵写 (1,1) 是越界写 8 字节（写到栈上相邻内存），
+                    // 实测直接触发 "stack smashing detected" → abort（栈回溯落在
+                    // ArmorTarget::update → update_multi）。这里只保留 r(0,0)。
                     return r;
                 },
                 [](const DiffVecZ& z_pred, const DiffVecZ& z) {
@@ -615,7 +619,23 @@ std::vector<std::pair<int, Armor>> ArmorTarget::match_armor(
             }
         }
         if (!in_gate) {
-            AWAKENING_WARN("match out of gate min total cost: {}", min_total_cost);
+            // 限流：小陀螺时"预测 vs 观测"本来就常错开，这条诊断实测会刷到 ~6 条/秒。
+            // 只影响日志，匹配流程不变（下面 greedy_match 依旧只接受门内的配对）。
+            static TimePoint last_warn_tp {};
+            static int suppressed = 0;
+            ++suppressed;
+            const auto now_wp = Clock::now();
+            if (last_warn_tp.time_since_epoch().count() == 0
+                || now_wp - last_warn_tp >= std::chrono::seconds(1))
+            {
+                AWAKENING_WARN(
+                    "match out of gate min total cost: {:.1f}（过去 1s 内共 {} 帧）",
+                    min_total_cost,
+                    suppressed
+                );
+                last_warn_tp = now_wp;
+                suppressed = 0;
+            }
         }
     }
     for (auto [obs, i]: dta_utils::greedy_match(cost, n_obs, maybe_visible.size(), MAX_COST)) {

@@ -21,15 +21,24 @@ inline void update_fsm(
     TrackState& state,
     int tracking_thres,
     double lost_time,
-    double lost_time_thres
+    double lost_time_thres,
+    int detecting_miss_tol = 0
 ) noexcept {
     switch (state.tracker_state) {
         case TrackState::DETECTING:
             if (!found) {
-                state.detect_count = 0;
-                state.tracker_state = TrackState::LOST;
+                // 【关键】刚 init 时，板子只要有一帧没被检出/没匹配上就回 LOST，
+                // "获取目标"几乎不可能完成：实测小陀螺/单板时每段 DETECTING 只有
+                // 1 帧、60 秒 init 546 次、永远进不了 TRACKING（因此也不出指令）。
+                // 这里容忍 detecting_miss_tol 次连续漏检再回 LOST。
+                if (++state.lost_count > detecting_miss_tol) {
+                    state.detect_count = 0;
+                    state.lost_count = 0;
+                    state.tracker_state = TrackState::LOST;
+                }
                 return;
             }
+            state.lost_count = 0;
             if (++state.detect_count > tracking_thres) {
                 state.detect_count = 0;
                 state.tracker_state = TrackState::TRACKING;

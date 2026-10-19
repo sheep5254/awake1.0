@@ -1,6 +1,5 @@
 #include "armor_infer.hpp"
 #include "tasks/auto_aim/type.hpp"
-#include <atomic>
 #include <cstddef>
 #include <memory>
 
@@ -221,11 +220,6 @@ struct ArmorInfer::Impl {
             conf_threshold = config["conf_threshold"].as<double>();
         }
     } params_;
-
-    // 诊断计数（读取后清零）
-    mutable std::atomic<int> stat_over_conf_ { 0 };
-    mutable std::atomic<int> stat_kept_ { 0 };
-
     Impl(const YAML::Node& config) {
         params_.load(config);
     }
@@ -326,11 +320,7 @@ struct ArmorInfer::Impl {
             net->confidence = confidence;
             out_objs.push_back(std::move(obj));
         }
-        // 诊断：NMS 前（过 conf 阈值）与 NMS 后的数量
-        stat_over_conf_.fetch_add(static_cast<int>(out_objs.size()), std::memory_order_relaxed);
-        auto ret = topk_and_nms(out_objs);
-        stat_kept_.fetch_add(static_cast<int>(ret.size()), std::memory_order_relaxed);
-        return ret;
+        return topk_and_nms(out_objs);
     }
     std::vector<Armor> postProcessRP_impl(const cv::Mat& out) const {
         std::vector<Armor> out_objs;
@@ -496,11 +486,5 @@ bool ArmorInfer::use_norm() const noexcept {
 }
 PixelFormat ArmorInfer::target_format() const noexcept {
     return _impl->target_format();
-}
-ArmorInfer::Stats ArmorInfer::take_stats() const noexcept {
-    Stats s;
-    s.over_conf = _impl->stat_over_conf_.exchange(0, std::memory_order_relaxed);
-    s.kept = _impl->stat_kept_.exchange(0, std::memory_order_relaxed);
-    return s;
 }
 } // namespace awakening::auto_aim

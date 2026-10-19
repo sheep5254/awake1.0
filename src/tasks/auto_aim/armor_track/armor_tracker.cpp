@@ -66,15 +66,24 @@ struct ArmorTracker::Impl {
         const auto valid_target = [&](Armor& armor) {
             const bool valid_color =
                 armor.color != ArmorColor::NONE && armor.color != ArmorColor::PURPLE;
-            // 号码决定板尺寸（no1=225mm 大板，其余 133mm），分类器明确判 UNKNOWN 的
-            // 板绝不能拿来 init：一次错 init 会让整段 PnP 距离/高度错 1.7 倍。
+            // 【修源码 bug】号码决定板尺寸（no1/outpost 走大板几何）：分类器明确判 UNKNOWN
+            // 的板不能拿来 init，否则会按错误的板尺寸解 PnP，位置直接错到相机旁边。
             const bool number_ok = !armor.number_classifier
                 || armor.number_classifier->number != ArmorClass::UNKNOWN;
             const bool keep_outpost =
                 target_buf_[cur_target_idx_].target_number == ArmorClass::OUTPOST
                 && armor.number != ArmorClass::OUTPOST && target_buf_[cur_target_idx_].check();
             const bool pnp_ok = ArmorTarget::armor_pnp(armor, camera_info, camera_cv_in_odom);
-            return valid_color && number_ok && !keep_outpost && pnp_ok;
+            // 【物理合理性】init 没有任何匹配门限，一次误检/退化 PnP（两灯条乱配、板只有
+            // 几像素）就会把状态直接设到几十米外（实测 p=[-75, 40, -20]，|p|≈88 m），
+            // 之后所有测量都在门限外、只能空推。这里只允许"相机前方 0.5~8 m"的板 init。
+            bool geometry_ok = true;
+            if (pnp_ok) {
+                const Vec3 p_cam = camera_cv_in_odom.inverse() * armor.pose.translation();
+                const double d = p_cam.norm();
+                geometry_ok = (d > 0.5) && (d < 8.0) && (p_cam.z() > 0.3);
+            }
+            return valid_color && number_ok && !keep_outpost && pnp_ok && geometry_ok;
         };
         Armor* selected_armor = nullptr;
         auto min_dis = std::numeric_limits<double>::max();
@@ -96,16 +105,7 @@ struct ArmorTracker::Impl {
         }
 
         Armor init_target = *selected_armor;
-        // 诊断（纯日志）：把 init 那一刻的两个号码来源都打出来。
-        //   e2e = 检测头原生输出（armor_infer CLASSES 表）, clf = 数字分类器 (label.txt)
-        AWAKENING_INFO(
-            "init target: {} (e2e={}, clf={})",
-            string_by_armor_class(init_target.number),
-            init_target.net ? string_by_armor_class(init_target.net->number) : std::string("cv"),
-            init_target.number_classifier
-                ? string_by_armor_class(init_target.number_classifier->number)
-                : std::string("none")
-        );
+        AWAKENING_INFO("init target: {}", string_by_armor_class(init_target.number));
         target.reset(init_target, cfg_, armors.timestamp, frame_id, camera_info, camera_cv_in_odom);
         target.track_state.tracker_state = ArmorTarget::TrackState::DETECTING;
         return true;
@@ -158,7 +158,8 @@ struct ArmorTracker::Impl {
             s,
             cfg_.tracking_thres,
             dta_utils::elapsed_sec(target.last_update, now),
-            lost_time_thres(target)
+            lost_time_thres(target),
+            cfg_.detecting_miss_tol
         );
     }
     double lost_time_thres(const ArmorTarget& target) const noexcept {

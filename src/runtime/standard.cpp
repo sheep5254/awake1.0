@@ -747,53 +747,6 @@ int main(int argc, char** argv) {
                     detect_frame_count.fetch_add(1, std::memory_order_relaxed);
 
                     // ---- 诊断：每秒统计检测各阶段数量（AWAKENING_DIAG_ARMOR=1）
-                    if (diag_armor) {
-                        static std::mutex diag_mtx;
-                        static std::map<std::string, int> diag_cnt;
-                        static int st_inf = 0;
-                        static int st_net_empty = 0, st_over_conf = 0, st_kept = 0, st_zero = 0;
-                        static int st_extract_fail = 0, st_out = 0;
-                        static auto diag_t0 = Clock::now();
-                        std::lock_guard<std::mutex> lk(diag_mtx);
-                        ++st_inf;
-                        for (const auto& a: as) {
-                            diag_cnt[string_by_armor_color(a.color) + "_"
-                                     + string_by_armor_class(a.number)]++;
-                        }
-                        const auto st = armor_detector.take_detect_stats();
-                        st_net_empty += st.net_empty;
-                        st_over_conf += st.over_conf;
-                        st_kept += st.kept;
-                        if (st.kept == 0) {
-                            ++st_zero;
-                        }
-                        st_extract_fail += st.extract_fail;
-                        st_out += st.out;
-                        const auto now = Clock::now();
-                        if (now - diag_t0 >= std::chrono::seconds(1)) {
-                            std::string s;
-                            for (const auto& [k, v]: diag_cnt) {
-                                s += fmt::format("{}({}) ", k, v);
-                            }
-                            AWAKENING_INFO(
-                                "[DIAG] armor/s: {}| inf={} net_empty={} over_conf={} kept={} "
-                                "zero={} extract_fail={} out={}",
-                                s.empty() ? std::string("(none) ") : s,
-                                st_inf,
-                                st_net_empty,
-                                st_over_conf,
-                                st_kept,
-                                st_zero,
-                                st_extract_fail,
-                                st_out
-                            );
-                            diag_cnt.clear();
-                            st_inf = st_net_empty = st_over_conf = st_kept = st_zero = 0;
-                            st_extract_fail = st_out = 0;
-                            diag_t0 = now;
-                        }
-                    }
-                    // ---- 诊断结束
                 }
             }
             if (inferred) {
@@ -885,25 +838,19 @@ int main(int argc, char** argv) {
                 armors.frame_id = std::to_underlying(SimpleFrame::ODOM);
                 auto __armor_target =
                     armor_tracker.track(armors, camera_info, camera_cv_in_odom, armors.frame_id);
-                // 【丢观测时冻结输出状态】last_update 只在 init / 真正 EKF 更新时才变；
-                // 它没变 = 这一帧没有可用观测（板子没检出/没匹配上）。原来的 EKF 会按
-                // 上一次的速度继续外推：实测丢 1.9 s 就把目标中心从 2.5 m 推到 9.9 m，
-                // 预测的装甲板"飞走"（pred 与实测差 898 px），ROI 也跟着飞 → 越丢越抓不回来。
-                // 这里只对**输出**刹车：车心钉在最后一次观测处、平移速度清零（转速保留，
-                // 装甲板仍绕冻结的车心转）。瞄准/ROI/显示都走这个输出；跟踪器内部状态不动。
-                bool record_braked = false;
+                // 【丢观测时冻结输出】last_update 只在 init/真正 EKF 更新时变；它没变 =
+                // 这一帧没有新的观测。内部状态会按上一次的速度自由积分，实测车心 z 能漂到
+                // -6~+1.6 m（"识别坐标系上下晃"），而瞄准读的就是这个输出。
+                // 这里把**输出**钉在最后一次观测处、平移速度清零（转速保留，装甲板仍绕
+                // 冻结的车心转）：瞄准/ROI/显示都跟着稳住，跟踪器内部状态不动。
                 {
                     static TimePoint last_seen_update {};
                     static Vec3 last_seen_pos = Vec3::Zero();
-                    // 判据：这一帧 EKF 有没有更新过（含**灯条观测**）。
-                    //   试过"必须检测到装甲板才算有观测"的版本，结果灯条带来的真实位置
-                    //   修正被丢掉，匹配率明显下降（found/detect 掉到 16~53%）、整体更差，
-                    //   已回退。代价是"只有灯条更新、没有装甲板"的那几十帧仍可能外推偏掉。
                     const bool has_obs = __armor_target.last_update != last_seen_update;
                     if (has_obs) {
                         last_seen_update = __armor_target.last_update;
                         last_seen_pos = __armor_target.get_target_state().pos();
-                    } else if (__armor_target.check()) {
+                    } else {
                         __armor_target.set_target_state_keep_id([&](auto& s) {
                             namespace idx = auto_aim::armor_point_motion_model::idx;
                             s.x[idx::CX] = last_seen_pos.x();
@@ -913,9 +860,14 @@ int main(int argc, char** argv) {
                             s.x[idx::VCY] = 0.0;
                             s.x[idx::VCZ] = 0.0;
                         });
-                        record_braked = true;
                     }
                 }
+                // 【丢观测时冻结输出状态】last_update 只在 init / 真正 EKF 更新时才变；
+                // 它没变 = 这一帧没有可用观测（板子没检出/没匹配上）。原来的 EKF 会按
+                // 上一次的速度继续外推：实测丢 1.9 s 就把目标中心从 2.5 m 推到 9.9 m，
+                // 预测的装甲板"飞走"（pred 与实测差 898 px），ROI 也跟着飞 → 越丢越抓不回来。
+                // 这里只对**输出**刹车：车心钉在最后一次观测处、平移速度清零（转速保留，
+                // 装甲板仍绕冻结的车心转）。瞄准/ROI/显示都走这个输出；跟踪器内部状态不动。
                 auto_aim_fsm_controller.update(
                     __armor_target.get_target_state().vyaw(),
                     __armor_target.jumped,
@@ -936,7 +888,6 @@ int main(int argc, char** argv) {
                     )
                                     .count();
                     j["enemy"] = (enemy_color.load() == EnemyColor::RED) ? "red" : "blue";
-                    j["brake"] = record_braked; // 这一帧是否因无观测被冻结（丢观测刹车）
                     {
                         const auto roi = record_roi.get();
                         j["roi"] = json::array({ roi.x, roi.y, roi.width, roi.height });
@@ -1363,8 +1314,17 @@ int main(int argc, char** argv) {
                 bool send_gimbal = false;
                 if (cmd.appear) {
                     if (nav_gimbal_delta) {
-                        pitch_cmd = to_nav_units(cmd.pitch - cur_pitch_deg);
-                        yaw_cmd = to_nav_units(wrap180(cmd.yaw - cur_yaw_deg));
+                        // 【逐拍增量限幅】视觉这边一旦状态跳变，算出来的增量可能是几十度
+                        // （实测云台被它甩飞后才出现 solve_pitch / out of gate 报错）。
+                        // 把单次增量限制在 ±MAX_STEP_DEG：按 ~200 Hz 发布，等效最高
+                        // 600°/s，正常跟踪时增量远小于 3°，所以不影响跟随精度。
+                        constexpr double MAX_STEP_DEG = 3.0;
+                        double d_pitch = cmd.pitch - cur_pitch_deg;
+                        double d_yaw = wrap180(cmd.yaw - cur_yaw_deg);
+                        d_pitch = std::clamp(d_pitch, -MAX_STEP_DEG, MAX_STEP_DEG);
+                        d_yaw = std::clamp(d_yaw, -MAX_STEP_DEG, MAX_STEP_DEG);
+                        pitch_cmd = to_nav_units(d_pitch);
+                        yaw_cmd = to_nav_units(d_yaw);
                     } else {
                         pitch_cmd = angles::from_degrees(cmd.pitch);
                         yaw_cmd = angles::from_degrees(cmd.yaw);
@@ -1488,26 +1448,9 @@ int main(int argc, char** argv) {
         ns.reset();
         // 自瞄出口计数：very_aim() 从哪条路退出去（含 get_hit/build_traj/replenish
         // 这些静默出口，原来日志里看不到）
-        auto& ast = auto_aim::aim_path_stats();
-        const int a_calls = ast.calls;
-        const int a_ok = ast.ok;
-        const int a_hit0 = ast.hit0;
-        const int a_cp0 = ast.cp0_invalid;
-        const int a_build = ast.build_fail;
-        const int a_mpc = ast.mpc_fail;
-        const int a_chit0 = ast.center_hit0;
-        const int a_cbuild = ast.center_build;
-        const int a_repl = ast.replenish;
-        const int a_nan = ast.nan_cmd;
-        const int a_bad = ast.state_bad;
-        const int a_cv = ast.clamp_v;
-        const int a_cy = ast.clamp_vyaw;
-        ast.reset();
         AWAKENING_INFO(
             "detect: {} track: {} found: {} solve: {} serial: {} bad_frame: {} camera: {} "
-            "number(e2e->clf): {} off_by_one: {}/{} clf_unknown: {} "
-            "aimer(calls/ok/hit/cp0/build/mpc/chit/cbuild/repl/nan/bad/cv/cy): "
-            "{}/{}/{}/{}/{}/{}/{}/{}/{}/{}/{}/{}/{} avg_latency: {:.3} ms",
+            "number(e2e->clf): {} off_by_one: {}/{} clf_unknown: {} avg_latency: {:.3} ms",
             log_ctx.detect_count,
             log_ctx.track_count,
             log_ctx.found_count,
@@ -1519,19 +1462,6 @@ int main(int argc, char** argv) {
             num_off_by_one,
             num_total,
             num_unknown,
-            a_calls,
-            a_ok,
-            a_hit0,
-            a_cp0,
-            a_build,
-            a_mpc,
-            a_chit0,
-            a_cbuild,
-            a_repl,
-            a_nan,
-            a_bad,
-            a_cv,
-            a_cy,
             avg_latency_ms
         );
         if (dbg) {

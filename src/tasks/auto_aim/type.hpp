@@ -14,25 +14,20 @@
 namespace awakening::auto_aim {
 constexpr double FIFTTEN_DEGREE_RAD = 15 * CV_PI / 180;
 enum class ArmorClass : int { SENTRY = 0, NO1, NO2, NO3, NO4, NO5, OUTPOST, BASE, UNKNOWN };
-// 诊断用：同一块板有两个号码来源
-//   ① E2E 检测头 (armor_infer.cpp 的 CLASSES 表，索引 0 = SENTRY)
-//   ② 数字分类器 (mlp + model/label.txt，索引 0 = NO1)
-// 若两者顺序不一致，就会出现"画面显示 no2、attack 却是 sentry/outpost"。
-// 期望：计数全落在对角线上；若大量落在 e+1（sentry->no1、no5->outpost …），
-// 说明 E2E 表相对 label.txt 整体错位一档。
+// 诊断用：同一块板有两个号码来源（E2E 检测头 / 数字分类器）。
+// 注意：识别与追踪已换回原版源码，所以这个计数目前不会被填充（日志里显示 none）。
 struct NumberSourceStats {
-    static constexpr int N = 9; // ArmorClass 取值个数 (SENTRY..UNKNOWN)
-    int pair[N][N] = {};        // [e2e][clf]
-    int clf_unknown = 0;        // 分类器判 UNKNOWN → tidy() 会退回 E2E 的号码
-    int total = 0;              // 参与统计的板数
-    void reset() {
-        *this = {};
-    }
+    static constexpr int N = 9;
+    int pair[N][N] = {};
+    int clf_unknown = 0;
+    int total = 0;
+    void reset() { *this = {}; }
 };
 inline NumberSourceStats& number_source_stats() {
     static NumberSourceStats s;
     return s;
 }
+
 enum class ArmorType : int { SimpleSmall, Large };
 template<ArmorType T>
 struct ArmorTypeTraits; // declare
@@ -354,10 +349,11 @@ struct Armor {
             key_points = net->key_points;
 
             if (number_classifier) {
-                // 分类器判 UNKNOWN 时**不退回**检测头的号码：检测头会把 no2 读成
-                // no1/sentry/outpost（实测 35/2700），而 no1/outpost 走的是大板几何，
-                // 一次错 init 就让整段距离/高度错 1.7 倍。保持 UNKNOWN，
-                // 由 init 侧的 number_ok 拒掉（宁可这一帧不锁）。
+                // 【修源码 bug】分类器判 UNKNOWN 时**不要**退回检测头号码：你们的检测头几乎
+                // 总把 no2 读成 outpost（实测 1013/1015），一旦退回，init 就会用"前哨站大板
+                // (225mm)"几何去解一块 133mm 小板 → 位置飞到相机旁边 → solve_pitch 失败、
+                // match out of gate 上万（日志 21:10:49 那串就是）。保持 UNKNOWN，
+                // 由 init 侧拒绝（见 armor_tracker.cpp 的 number_ok）。
                 number = number_classifier->number;
             }
             if (color_classifier) {

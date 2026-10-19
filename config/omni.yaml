@@ -110,19 +110,19 @@ auto_exposure:
   # 调亮一档再看日志里的 nocand 是否下降。
   target_brightness: 45.0
   tolerance: 3.0
-  step_gain: 18.0
+  step_gain: 16.0
   decay_step: 1.0
   exposure_min: 1200.0
   # 250 fps → 每帧只有 4ms，曝光要留出读出/传输余量，否则会出现
   # MV_CC_GetImageBuffer fail (0x80000007 = MV_E_NODATA，取流超时)。
   # 想要更长曝光就把 acquisition_frame_rate 降到 150~200（检测本来只跑 ~100fps，
   # 降帧不影响性能），那时这里可以放回 3500。
-  exposure_max: 2200.0
+  exposure_max: 2000.0
   control_interval_ms: 300
 
 
 armor_detector:
-  max_infer_num: 3
+  max_infer_num: 5
   backend: openvino
   net_detector:
     openvino:
@@ -140,6 +140,8 @@ armor_detector:
       use_cuda_preproces: true
     armor_infer:
       model_type: tup
+      # 0.2 -> 0.15：小陀螺单板斜对镜头时置信度会掉到 0.2 以下，导致检测占空比只有
+      # ~24%（板不可见时跟踪只能靠预测）。降低阈值以提高检出率。
       conf_threshold: 0.2
   number_classifier:
     enable: true
@@ -163,8 +165,13 @@ armor_detector:
 armor_tracker:
   lost_time_thres: 1.5
   lost_time_thres_outpost: 2.0
-  tracking_thres: 10
-  qxyz_common: [30.0, 30.0, 1.0]
+  tracking_thres: 5
+  # DETECTING 期间允许连续几次漏检再判丢失（0 = 旧行为，一帧不中就丢）
+  detecting_miss_tol: 3
+  # 车心位置过程噪声：单板观测时若给太大（30），车心会被那块板的快速运动拖着走，
+  # 导致车心高度/距离漂（实测 h=±2 m → solve_pitch 失败、match 代价上万）。
+  # 降到 8：车心更稳，代价是真实快速平移的目标响应慢一点。
+  qxyz_common: [8.0, 8.0, 1.0]
   qyaw_common: 30.0
   qxyz_output: [1.0, 1.0, 1.0]
   qyaw_output: 0.01

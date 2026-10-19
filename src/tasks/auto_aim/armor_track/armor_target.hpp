@@ -17,6 +17,8 @@ struct ArmorTrackerCfg {
     double lost_time_thres;
     double lost_time_thres_outpost;
     int tracking_thres;
+    // DETECTING 期间允许连续几次漏检（见 dta_utils::update_fsm）。0 = 旧行为。
+    int detecting_miss_tol = 3;
     double armor_match_gate;
     double armor_match_gate_not_all_init;
     double armor_match_w_center_err;
@@ -43,6 +45,8 @@ struct ArmorTrackerCfg {
         lost_time_thres = config["lost_time_thres"].as<double>();
         lost_time_thres_outpost = config["lost_time_thres_outpost"].as<double>();
         tracking_thres = config["tracking_thres"].as<int>();
+        detecting_miss_tol =
+            config["detecting_miss_tol"] ? config["detecting_miss_tol"].as<int>() : 3;
         armor_match_gate = config["armor_match_gate"].as<double>();
         armor_match_gate_not_all_init = config["armor_match_gate_not_all_init"].as<double>();
         armor_match_w_center_err = config["armor_match_w_center_err"].as<double>();
@@ -175,8 +179,8 @@ public:
         this_id = GLOBAL_ID++;
         f(target_state);
     }
-    // 同 set_target_state，但**不动 this_id**：给下游做"丢观测时冻结输出状态"用。
-    // 动 this_id 会让 very_aimer 认为换了目标 → 每帧重建轨迹（很贵且没必要）。
+    // 同 set_target_state，但**不动 this_id**：给下游做"丢观测时冻结输出"用。
+    // （动 this_id 会让 very_aimer 认为换了目标 → 每帧重建轨迹）
     template<typename F>
     void set_target_state_keep_id(F&& f) {
         f(target_state);

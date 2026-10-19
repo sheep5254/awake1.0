@@ -160,72 +160,27 @@ struct VeryAimer::Impl {
     ) const noexcept {
         dta_utils::ControlPoint cp;
         auto p = armor_pose.translation() - shoot_in_gimbal_odom.translation();
-        // 每秒打印一次 p（不管能不能解），用于核对"p 的坐标系/尺度"是否和物理一致：
-        // 把靶摆在正前方 ~3 m、与相机等高，正确时 p 应≈(3, 0, 小量)；
-        // 若 p 主要是 z 分量（≈(0, 小, 3)）→ p 还是相机(cv)系没转过来；
-        // 若 |p| 明显偏小/偏大 → 多半是装甲板尺寸(号码)用错，PnP 距离被缩放。
-        {
-            static TimePoint last_dbg_tp {};
-            const auto now_dbg = Clock::now();
-            if (last_dbg_tp.time_since_epoch().count() == 0
-                || now_dbg - last_dbg_tp >= std::chrono::seconds(1))
+        auto desired_pitch_opt = ballistic_trajectory_->solve_pitch(p, bullet_speed);
+        if (!desired_pitch_opt) {
+            cp.valid = false;
+            // 限流（最多 1 条/秒）：状态被带偏的那几帧会连续触发，原来每拍一条把日志刷爆。
+            // 同时打印距离/高度，方便区分是"状态错"（|p| 不对）还是"真超范围"。
+            static TimePoint last_warn_tp {};
+            const auto now_wp = Clock::now();
+            if (last_warn_tp.time_since_epoch().count() == 0
+                || now_wp - last_warn_tp >= std::chrono::seconds(1))
             {
-                last_dbg_tp = now_dbg;
-                AWAKENING_INFO(
-                    "very_aimer: target={} p=[{:.3f}, {:.3f}, {:.3f}] |p|={:.2f} h={:.2f} "
-                    "d={:.2f} yaw={:.1f}deg",
-                    (dbg_target_number_ >= 0 && dbg_target_number_ < 8)
-                        ? string_by_armor_class(static_cast<ArmorClass>(dbg_target_number_))
-                        : std::string("?"),
+                last_warn_tp = now_wp;
+                AWAKENING_WARN(
+                    "very_aimer: solve_pitch failed | p=[{:.2f},{:.2f},{:.2f}] |p|={:.2f} "
+                    "h={:.2f} d={:.2f} v0={:.1f}",
                     p.x(),
                     p.y(),
                     p.z(),
                     p.norm(),
                     p.z(),
                     std::hypot(p.x(), p.y()),
-                    angles::to_degrees(std::atan2(p.y(), p.x()))
-                );
-            }
-        }
-        auto desired_pitch_opt = ballistic_trajectory_->solve_pitch(p, bullet_speed);
-        if (!desired_pitch_opt) {
-            cp.valid = false;
-            // 限流（最多 1 条/秒）+ 诊断：p 按"当前约定"和"相机(cv)约定"各解一次，
-            // 哪个能解出来就说明 p 实际在哪个系里 —— 用来区分
-            // "p 少转了 cv→物理 这一步（armor_pose 还是相机系）" 还是 "真的超出俯仰范围"。
-            //   cv 约定 = (x 右, y 下, z 前)；物理/云台 = (x 前, y 左, z 上)
-            static TimePoint last_err_tp {};
-            const auto now_err = Clock::now();
-            if (last_err_tp.time_since_epoch().count() == 0
-                || now_err - last_err_tp >= std::chrono::seconds(1))
-            {
-                last_err_tp = now_err;
-                const Vec3 p_cv = R_CV2PHYSICS * p; // 若 p 其实还是相机系分量，这才是云台系位置
-                const auto pitch_cv = ballistic_trajectory_->solve_pitch(p_cv, bullet_speed);
-                char pitch_cv_str[48] = "仍无解";
-                if (pitch_cv) {
-                    std::snprintf(
-                        pitch_cv_str,
-                        sizeof(pitch_cv_str),
-                        "%.2fdeg (可解)",
-                        angles::to_degrees(*pitch_cv)
-                    );
-                }
-                AWAKENING_ERROR(
-                    "very_aimer: solve_pitch failed. p=[{:.3f}, {:.3f}, {:.3f}] h={:.2f} d={:.2f} "
-                    "v0={:.1f} || 若按相机cv解释 p'=[{:.3f}, {:.3f}, {:.3f}] h'={:.2f} d'={:.2f} -> pitch {}",
-                    p.x(),
-                    p.y(),
-                    p.z(),
-                    p.z(),
-                    std::hypot(p.x(), p.y()),
-                    bullet_speed,
-                    p_cv.x(),
-                    p_cv.y(),
-                    p_cv.z(),
-                    p_cv.z(),
-                    std::hypot(p_cv.x(), p_cv.y()),
-                    pitch_cv_str
+                    bullet_speed
                 );
             }
             return cp;
@@ -379,8 +334,6 @@ struct VeryAimer::Impl {
     dta_utils::ControlPoint aim_center_target_traj_cp0_;
     double last_fly_time_;
     int last_select_;
-    int dbg_target_number_ = -1; // 仅用于日志：当前跟踪的目标类型(号码)
-    int dbg_forward_idx_ = -1;   // 仅用于日志：上次 replenish 用的前向索引
     [[nodiscard]] GimbalCmd very_aim(
         const ArmorTarget& _target,
         double bullet_speed,
@@ -388,18 +341,6 @@ struct VeryAimer::Impl {
         const ISO3& shoot_in_gimbal_odom,
         const ISO3& gimbal_in_gimbal_odom
     ) noexcept {
-        dbg_target_number_ = static_cast<int>(_target.target_number);
-        aim_path_stats().calls += 1;
-        // 【可信度门：仅统计，暂不生效】原来试着"命中就复用上一条有效指令"（云台原地
-        // 不动），实测比不做更差，已退回 18:48 那版行为。保留计数用于量化"多频繁会离谱"。
-        {
-            const auto& st = _target.get_target_state();
-            const double d = st.pos().norm();
-            const bool pos_bad = !(d > 0.8 && d < 7.0) || std::abs(st.h()) > 1.0;
-            if (pos_bad) {
-                aim_path_stats().state_bad += 1;
-            }
-        }
         if (_target.target_number == ArmorClass::BASE) {
             fsm = AutoAimFsm::AIM_SINGLE_ARMOR;
         }
@@ -420,21 +361,6 @@ struct VeryAimer::Impl {
         auto target = _target.fast_copy_without_ekf();
         target.set_target_state([&](armor_point_motion_model::State& state) {
             state.predict(now, target.target_number);
-            // 速度/转速限幅：**只统计不生效**（试过真限幅，vyaw 砍到 10 rad/s 明显更差 ——
-            // 实际转速常在 15+ rad/s；保留计数用来量真实分布）。
-            namespace idx = armor_point_motion_model::idx;
-            constexpr double V_MAX = 5.0;     // m/s
-            constexpr double VYAW_MAX = 10.0; // rad/s
-            const double v3 = std::sqrt(
-                state.x[idx::VCX] * state.x[idx::VCX] + state.x[idx::VCY] * state.x[idx::VCY]
-                + state.x[idx::VCZ] * state.x[idx::VCZ]
-            );
-            if (v3 > V_MAX) {
-                aim_path_stats().clamp_v += 1;
-            }
-            if (std::abs(state.x[idx::VYAW]) > VYAW_MAX) {
-                aim_path_stats().clamp_vyaw += 1;
-            }
         });
         auto make_even = [](int x) { return x % 2 == 0 ? x : x + 1; };
         const int horizon = make_even(params_.sample_horizon);
@@ -485,7 +411,6 @@ struct VeryAimer::Impl {
             auto hit_ctx_opt =
                 get_hit(target, bullet_speed, fsm, shoot_in_gimbal_odom); //直接算到击中目标时间
             if (!hit_ctx_opt) {
-                aim_path_stats().hit0 += 1;
                 return cmd;
             }
             const auto& hit_ctx = *hit_ctx_opt;
@@ -497,7 +422,6 @@ struct VeryAimer::Impl {
                 gimbal_in_gimbal_odom
             );
             if (!cp0.valid) {
-                aim_path_stats().cp0_invalid += 1;
                 return cmd;
             }
             last_fly_time_ = hit_ctx.fly_time;
@@ -537,7 +461,6 @@ struct VeryAimer::Impl {
             aim_traj_.reserve(horizon + 1);
 
             if (!build_traj(limit_traj_, aim_traj_, limit_traj_cp0_, fsm, horizon, dt)) {
-                aim_path_stats().build_fail += 1;
                 return cmd;
             }
             if (!mpc_traj_) {
@@ -545,7 +468,6 @@ struct VeryAimer::Impl {
             } else {
                 if (!mpc_traj_->solve(limit_traj_, time_in_traj)) {
                     AWAKENING_ERROR("very_aimer: mpc solve failed");
-                    aim_path_stats().mpc_fail += 1;
                     return cmd;
                 }
             }
@@ -560,7 +482,6 @@ struct VeryAimer::Impl {
                     shoot_in_gimbal_odom
                 );
                 if (!aim_center_target_hit_ctx_opt) {
-                    aim_path_stats().center_hit0 += 1;
                     return cmd;
                 }
                 const auto& aim_center_target_hit_ctx = *aim_center_target_hit_ctx_opt;
@@ -582,7 +503,6 @@ struct VeryAimer::Impl {
                         dt
                     ))
                 {
-                    aim_path_stats().center_build += 1;
                     return cmd;
                 }
             }
@@ -606,7 +526,6 @@ struct VeryAimer::Impl {
                 return true;
             };
             const size_t old_limit_size = limit_traj_.size();
-            dbg_forward_idx_ = target_forward_idx;
             if (!replenish_traj(
                     limit_traj_,
                     aim_traj_,
@@ -615,7 +534,6 @@ struct VeryAimer::Impl {
                     target_forward_idx,
                     dt
                 )) {
-                aim_path_stats().replenish += 1;
                 return cmd;
             }
             if (limit_traj_.size() > old_limit_size) {
@@ -629,7 +547,6 @@ struct VeryAimer::Impl {
                 } else {
                     if (!mpc_traj_->solve(limit_traj_, time_in_traj)) {
                         AWAKENING_ERROR("very_aimer: mpc solve failed");
-                        aim_path_stats().mpc_fail += 1;
                         return cmd;
                     }
                 }
@@ -644,7 +561,6 @@ struct VeryAimer::Impl {
                         dt
                     ))
                 {
-                    aim_path_stats().replenish += 1;
                     return cmd;
                 }
             }
@@ -772,71 +688,6 @@ struct VeryAimer::Impl {
             }
         }
 
-        // 指令健全性检查：轨迹/MPC 一旦产出 NaN/Inf，绝不能把 appear=true 的脏值
-        // 交给下游。发布路径（standard.cpp）虽有 isfinite 保护，但 debug 叠加层会
-        // 直接画出来（画面上就是 "+nan"）。这里直接按"丢目标"处理：增量 0/0、不开火。
-        if (!cmd.is_valid()) {
-            auto& st = aim_path_stats();
-            st.nan_cmd += 1;
-            // 首次触发时 dump 一次中间量，用来定位 NaN 到底出在哪一层
-            //   （MPC/limit 轨迹、target 轨迹、cp0、时间推进、前向索引）
-            if (st.nan_cmd == 1) {
-                AWAKENING_WARN(
-                    "[AIM-DUMP] is_same={} t_in_traj={:.4f} horizon={} dt={:.4f} mpc={} fsm={} "
-                    "fwd_idx={} num={}",
-                    is_same,
-                    time_in_traj,
-                    horizon,
-                    dt,
-                    mpc_traj_ ? 1 : 0,
-                    static_cast<int>(fsm),
-                    dbg_forward_idx_,
-                    static_cast<int>(target.target_number)
-                );
-                AWAKENING_WARN(
-                    "[AIM-DUMP] cp0 yaw={:.4f} pitch={:.4f} valid={} | ctrl yaw p/v/a="
-                    "{:.4f}/{:.4f}/{:.4f}",
-                    limit_traj_cp0_.yaw,
-                    limit_traj_cp0_.pitch,
-                    limit_traj_cp0_.valid,
-                    control.yaw_state.p,
-                    control.yaw_state.v,
-                    control.yaw_state.a
-                );
-                AWAKENING_WARN(
-                    "[AIM-DUMP] ctrl pitch p/v/a={:.4f}/{:.4f}/{:.4f} | tgt yaw_p={:.4f} "
-                    "pitch_p={:.4f} | tgt_pos=[{:.2f},{:.2f},{:.2f}]",
-                    control.pitch_state.p,
-                    control.pitch_state.v,
-                    control.pitch_state.a,
-                    target_gimbal_state.yaw_state.p,
-                    target_gimbal_state.pitch_state.p,
-                    target.get_target_state().pos().x(),
-                    target.get_target_state().pos().y(),
-                    target.get_target_state().pos().z()
-                );
-            }
-            static TimePoint last_warn {};
-            const auto now_warn = Clock::now();
-            if (now_warn - last_warn > std::chrono::seconds(1)) {
-                last_warn = now_warn;
-                AWAKENING_WARN(
-                    "very_aimer: invalid cmd (NaN/Inf), treat as lost | yaw={} pitch={} "
-                    "v_yaw={} v_pitch={} a_yaw={} a_pitch={}",
-                    cmd.yaw,
-                    cmd.pitch,
-                    cmd.v_yaw,
-                    cmd.v_pitch,
-                    cmd.a_yaw,
-                    cmd.a_pitch
-                );
-            }
-            cmd = GimbalCmd {};
-            cmd.timestamp = now_warn;
-            return cmd;
-        }
-
-        aim_path_stats().ok += 1;
         return cmd;
     }
     void set_operator_offset(std::pair<double, double> offset) {
