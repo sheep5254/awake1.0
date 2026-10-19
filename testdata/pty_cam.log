@@ -1,0 +1,80 @@
+自瞄启动中：config=testdata/pty_cam.yaml  debug=false
+[38;2;255;0;0m [38;2;255;26;0m [38;2;255;52;0m [38;2;255;79;0m [38;2;255;105;0m_[38;2;255;131;0m_[38;2;255;158;0m_[38;2;255;184;0m [38;2;255;211;0m_[38;2;255;237;0m [38;2;246;255;0m [38;2;219;255;0m [38;2;193;255;0m [38;2;167;255;0m [38;2;140;255;0m [38;2;114;255;0m [38;2;87;255;0m_[38;2;61;255;0m_[38;2;35;255;0m_[38;2;8;255;0m_[38;2;0;255;17m_[38;2;0;255;43m [38;2;0;255;70m [38;2;0;255;96m [38;2;0;255;123m [38;2;0;255;149m_[38;2;0;255;175m_[38;2;0;255;202m [38;2;0;255;228m_[38;2;0;255;255m_[38;2;0;228;255m [38;2;0;202;255m_[38;2;0;175;255m_[38;2;0;149;255m_[38;2;0;123;255m_[38;2;0;96;255m_[38;2;0;70;255m_[38;2;0;43;255m_[38;2;0;17;255m [38;2;8;0;255m [38;2;35;0;255m [38;2;61;0;255m_[38;2;87;0;255m_[38;2;114;0;255m_[38;2;140;0;255m_[38;2;167;0;255m_[38;2;193;0;255m_[38;2;219;0;255m_[38;2;246;0;255m [38;2;255;0;237m [38;2;255;0;211m [38;2;255;0;184m_[38;2;255;0;158m_[38;2;255;0;131m_[38;2;255;0;105m_[38;2;255;0;79m_[38;2;255;0;52m_[38;2;255;0;26m_[38;2;255;0;0m_[0m
+[38;2;255;0;0m [38;2;255;26;0m [38;2;255;52;0m [38;2;255;79;0m/[38;2;255;105;0m [38;2;255;131;0m [38;2;255;158;0m [38;2;255;184;0m|[38;2;255;211;0m [38;2;255;237;0m|[38;2;246;255;0m [38;2;219;255;0m [38;2;193;255;0m [38;2;167;255;0m [38;2;140;255;0m [38;2;114;255;0m/[38;2;87;255;0m [38;2;61;255;0m/[38;2;35;255;0m [38;2;8;255;0m [38;2;0;255;17m [38;2;0;255;43m|[38;2;0;255;70m [38;2;0;255;96m [38;2;0;255;123m/[38;2;0;255;149m [38;2;0;255;175m/[38;2;0;255;202m/[38;2;0;255;228m_[38;2;0;255;255m/[38;2;0;228;255m/[38;2;0;202;255m [38;2;0;175;255m_[38;2;0;149;255m_[38;2;0;123;255m_[38;2;0;96;255m_[38;2;0;70;255m/[38;2;0;43;255m [38;2;0;17;255m|[38;2;8;0;255m [38;2;35;0;255m/[38;2;61;0;255m [38;2;87;0;255m/[38;2;114;0;255m [38;2;140;0;255m [38;2;167;0;255m_[38;2;193;0;255m/[38;2;219;0;255m [38;2;246;0;255m|[38;2;255;0;237m [38;2;255;0;211m/[38;2;255;0;184m [38;2;255;0;158m/[38;2;255;0;131m [38;2;255;0;105m_[38;2;255;0;79m_[38;2;255;0;52m_[38;2;255;0;26m_[38;2;255;0;0m/[0m
+[38;2;255;0;0m [38;2;255;26;0m [38;2;255;52;0m/[38;2;255;79;0m [38;2;255;105;0m/[38;2;255;131;0m|[38;2;255;158;0m [38;2;255;184;0m|[38;2;255;211;0m [38;2;255;237;0m|[38;2;246;255;0m [38;2;219;255;0m/[38;2;193;255;0m|[38;2;167;255;0m [38;2;140;255;0m/[38;2;114;255;0m [38;2;87;255;0m/[38;2;61;255;0m [38;2;35;255;0m/[38;2;8;255;0m|[38;2;0;255;17m [38;2;0;255;43m|[38;2;0;255;70m [38;2;0;255;96m/[38;2;0;255;123m [38;2;0;255;149m,[38;2;0;255;175m<[38;2;0;255;202m [38;2;0;255;228m [38;2;0;255;255m/[38;2;0;228;255m [38;2;0;202;255m_[38;2;0;175;255m_[38;2;0;149;255m/[38;2;0;123;255m [38;2;0;96;255m/[38;2;0;70;255m [38;2;0;43;255m [38;2;0;17;255m|[38;2;8;0;255m/[38;2;35;0;255m [38;2;61;0;255m/[38;2;87;0;255m/[38;2;114;0;255m [38;2;140;0;255m/[38;2;167;0;255m/[38;2;193;0;255m [38;2;219;0;255m [38;2;246;0;255m|[38;2;255;0;237m/[38;2;255;0;211m [38;2;255;0;184m/[38;2;255;0;158m [38;2;255;0;131m/[38;2;255;0;105m [38;2;255;0;79m_[38;2;255;0;52m_[38;2;255;0;26m [38;2;255;0;0m [0m
+[38;2;255;0;0m [38;2;255;26;0m/[38;2;255;52;0m [38;2;255;79;0m_[38;2;255;105;0m_[38;2;255;131;0m_[38;2;255;158;0m [38;2;255;184;0m|[38;2;255;211;0m [38;2;255;237;0m|[38;2;246;255;0m/[38;2;219;255;0m [38;2;193;255;0m|[38;2;167;255;0m/[38;2;140;255;0m [38;2;114;255;0m/[38;2;87;255;0m [38;2;61;255;0m_[38;2;35;255;0m_[38;2;8;255;0m_[38;2;0;255;17m [38;2;0;255;43m|[38;2;0;255;70m/[38;2;0;255;96m [38;2;0;255;123m/[38;2;0;255;149m|[38;2;0;255;175m [38;2;0;255;202m|[38;2;0;255;228m/[38;2;0;255;255m [38;2;0;228;255m/[38;2;0;202;255m_[38;2;0;175;255m_[38;2;0;149;255m_[38;2;0;123;255m/[38;2;0;96;255m [38;2;0;70;255m/[38;2;0;43;255m|[38;2;0;17;255m [38;2;8;0;255m [38;2;35;0;255m/[38;2;61;0;255m/[38;2;87;0;255m [38;2;114;0;255m/[38;2;140;0;255m/[38;2;167;0;255m [38;2;193;0;255m/[38;2;219;0;255m|[38;2;246;0;255m [38;2;255;0;237m [38;2;255;0;211m/[38;2;255;0;184m [38;2;255;0;158m/[38;2;255;0;131m_[38;2;255;0;105m/[38;2;255;0;79m [38;2;255;0;52m/[38;2;255;0;26m [38;2;255;0;0m [0m
+[38;2;255;0;0m/[38;2;255;26;0m_[38;2;255;52;0m/[38;2;255;79;0m [38;2;255;105;0m [38;2;255;131;0m|[38;2;255;158;0m_[38;2;255;184;0m|[38;2;255;211;0m_[38;2;255;237;0m_[38;2;246;255;0m/[38;2;219;255;0m|[38;2;193;255;0m_[38;2;167;255;0m_[38;2;140;255;0m/[38;2;114;255;0m_[38;2;87;255;0m/[38;2;61;255;0m [38;2;35;255;0m [38;2;8;255;0m|[38;2;0;255;17m_[38;2;0;255;43m/[38;2;0;255;70m_[38;2;0;255;96m/[38;2;0;255;123m [38;2;0;255;149m|[38;2;0;255;175m_[38;2;0;255;202m/[38;2;0;255;228m_[38;2;0;255;255m_[38;2;0;228;255m_[38;2;0;202;255m_[38;2;0;175;255m_[38;2;0;149;255m/[38;2;0;123;255m_[38;2;0;96;255m/[38;2;0;70;255m [38;2;0;43;255m|[38;2;0;17;255m_[38;2;8;0;255m/[38;2;35;0;255m_[38;2;61;0;255m_[38;2;87;0;255m_[38;2;114;0;255m/[38;2;140;0;255m_[38;2;167;0;255m/[38;2;193;0;255m [38;2;219;0;255m|[38;2;246;0;255m_[38;2;255;0;237m|[38;2;255;0;211m\[38;2;255;0;184m_[38;2;255;0;158m_[38;2;255;0;131m_[38;2;255;0;105m_[38;2;255;0;79m/[38;2;255;0;52m [38;2;255;0;26m [38;2;255;0;0m [0m
+[22:59:52.133] [info] Logger initialized successfully. Current log file: /home/oconnor/Downloads/awakening-main/log/2026-10-08_22-59-52.log
+[22:59:52.133] [info] Log folder: /home/oconnor/Downloads/awakening-main/log
+get args testdata/pty_cam.yaml
+get args false
+[22:59:52.148] [info] Found 1 USB camera(s):
+[22:59:52.148] [info] [ 0 ] SN = 00J38611357
+[22:59:52.148] [info] Selecting camera at index 0 (SN=00J38611357)
+[22:59:52.510] [info] Camera initialized successfully
+[22:59:52.513] [info] hik_camera: AcquisitionFrameRate set to 250
+[22:59:52.514] [info] hik_camera: ExposureTime set to 2500
+[22:59:52.514] [info] hik_camera: Gain set to 16.9
+[22:59:52.515] [error] hik_camera: Failed to set Gamma, status=-2147483386
+[22:59:52.516] [info] hik_camera: ADCBitDepth set to Bits_8
+[22:59:52.517] [info] hik_camera: PixelFormat set to BayerRG8
+[22:59:52.518] [info] hik_camera: AcquisitionFrameRateEnable set to 1
+[22:59:52.523] [info] hik_camera: Width set to 1280
+[22:59:52.525] [info] hik_camera: Height set to 720
+[22:59:52.525] [info] hik_camera: OffsetX centered = 80 (WidthMax=1440, size=1280)
+[22:59:52.526] [info] hik_camera: OffsetX set to 80
+[22:59:52.527] [info] hik_camera: OffsetY centered = 180 (HeightMax=1080, size=720)
+[22:59:52.528] [info] hik_camera: OffsetY set to 180
+[22:59:52.528] [info] hik_camera: ReverseX set to 0
+[22:59:52.613] [info] hik_camera: ReverseY set to 0
+[22:59:52.613] [error] hik_camera: Failed to set TriggerMode, status=-2147483644
+[22:59:52.614] [error] hik_camera: Failed to set TriggerSource, status=-2147483644
+[22:59:52.614] [error] hik_camera: Failed to set TriggerActivation, status=-2147483644
+[22:59:52.614] [info] hik_camera: flip = 180 (code -1)
+[22:59:52.614] [info] Camera parameters set successfully!
+[22:59:52.615] [debug] Successfully loaded number classifier model from /home/oconnor/Downloads/awakening-main/model/mlp.onnx
+[22:59:52.822] [info] OpenVINO model : /home/oconnor/Downloads/awakening-main/model/opt-1208-001.onnx compiled successfully!
+[22:59:52.822] [info] very_aimer: using  MpcTrajectory
+[22:59:52.975] [info] OpenVINO model : /home/oconnor/Downloads/awakening-main/model/cb_rune.onnx compiled successfully!
+[22:59:52.975] [info] wheel odometry reset
+[22:59:52.986] [info] debug window enabled: press ESC or 'q' to close it
+[22:59:52.986] [info] serial open success: /dev/pts/5
+[22:59:52.986] [info] detect: 0 track: 0 found: 0 solve: 1 serial: 0 camera: 0 avg_latency: -nan ms
+[22:59:53.009] [debug] Created thread-local number classifier model
+[22:59:53.010] [debug] Created thread-local number classifier model
+[22:59:53.018] [debug] Created thread-local number classifier model
+[22:59:53.042] [debug] Created thread-local number classifier model
+[22:59:53.044] [debug] Created thread-local number classifier model
+[22:59:53.051] [debug] Created thread-local number classifier model
+[22:59:53.061] [debug] Created thread-local number classifier model
+[22:59:53.075] [debug] Created thread-local number classifier model
+[22:59:53.127] [debug] Created thread-local number classifier model
+[22:59:53.178] [debug] Created thread-local number classifier model
+[22:59:53.267] [debug] Created thread-local number classifier model
+[22:59:53.350] [debug] Created thread-local number classifier model
+[22:59:53.417] [debug] Created thread-local number classifier model
+[22:59:53.987] [info] detect: 127 track: 127 found: 0 solve: 958 serial: 0 camera: 232 avg_latency: 19.4 ms
+[22:59:54.987] [info] detect: 158 track: 158 found: 0 solve: 989 serial: 0 camera: 248 avg_latency: 15.3 ms
+[22:59:55.987] [info] detect: 159 track: 159 found: 0 solve: 965 serial: 0 camera: 248 avg_latency: 15.3 ms
+[22:59:56.987] [info] detect: 156 track: 156 found: 0 solve: 971 serial: 0 camera: 247 avg_latency: 15.8 ms
+[22:59:57.987] [info] detect: 146 track: 146 found: 0 solve: 952 serial: 44 camera: 239 avg_latency: 16.8 ms
+[22:59:58.393] [debug] Created thread-local number classifier model
+[22:59:58.558] [debug] Created thread-local number classifier model
+[22:59:58.987] [info] detect: 154 track: 154 found: 0 solve: 979 serial: 48 camera: 244 avg_latency: 16.4 ms
+[22:59:59.017] [debug] Created thread-local number classifier model
+[22:59:59.518] [info] Signal 15 received, stopping...
+[22:59:59.519] [error] serial error: End of file
+[22:59:59.532] [info] hik_camera has stop 
+[22:59:59.719] [warning] serial /dev/pts/5 unavailable (没有那个文件或目录); running WITHOUT serial, retrying every 500ms
+[22:59:59.987] [info] detect: 78 track: 78 found: 0 solve: 975 serial: 26 camera: 123 avg_latency: 17.8 ms
+[23:00:00.988] [info] awakening Scheduler stopped
+[23:00:00.992] [critical] 改了东西记得同步其他有关的exe的src
+[23:00:00.992] [critical] 改了东西记得同步其他有关的exe的src
+[23:00:00.992] [critical] 改了东西记得同步其他有关的exe的src
+[23:00:00.992] [critical] 改了东西记得同步其他有关的exe的src
+[23:00:00.992] [critical] 改了东西记得同步其他有关的exe的src
+[23:00:00.992] [critical] 改了东西记得同步其他有关的exe的src
+[23:00:00.992] [critical] 改了东西记得同步其他有关的exe的src
+[23:00:00.992] [critical] 改了东西记得同步其他有关的exe的src
+[23:00:00.992] [critical] 改了东西记得同步其他有关的exe的src
+[23:00:00.992] [critical] 改了东西记得同步其他有关的exe的src

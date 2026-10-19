@@ -1,0 +1,426 @@
+mode: auto_aim
+enemy_color: red
+bullet_speed: 22.0
+
+# 逐帧诊断记录（纯写文件，不影响任何处理逻辑）
+#   文件固定为 record/auto_aim/run.jsonl，**每次启动自瞄都会覆盖上一次的**。
+#   每帧一行 JSON：检测到的板(号码两种来源/置信度/像素框/PnP)、跟踪器状态
+#   (state/num/pos/vel/vyaw/yaw/r1/r2/h/jumped)、预测装甲板(odom+投影像素)、
+#   图像时刻云台姿态(IMU)、最近一次云台指令(含 age_ms)。
+#   注意：键名是 frame_log —— 不能用 record，那个键是"录屏(video)"（config 后面
+#   的 record: enable: false），重名会被 YAML 覆盖、把录屏一起打开。
+frame_log:
+  enable: true
+
+serial:
+  enable: true
+  # 视觉下位机（USB 物理口 3-9）。用 by-path 而不是 ttyUSB1 —— 两个 CH340
+  # 都没有序列号，插拔顺序一变 ttyUSB0/1 就会互换。
+  # 若装了 udev 规则（见 README/对话记录里的 99-robot-serial.rules），可改成 /dev/vision_mcu。
+  device_name: /dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0
+  # 只收下位机的 IMU（云台四元数），**不**直接串口下发指令：
+  # 指令统一走 ROS/导航，避免和导航抢云台。要恢复"视觉直接闭环"改成 true。
+  send_enable: false
+  baud_rate: 115200
+  char_size: 8
+  read_buf_size: 4096
+
+  # ---- 串口协议版本切换（发送 / 接收 各一个，默认都为 1）----
+  # 两个参数独立，可以只换一个方向，例如 send_protocol=1 + recv_protocol=0。
+  #
+  # send_protocol:
+  #   0 = 原有二进制包 SendRobotCmdData (cmd_ID=0x01):
+  #       uint8 cmd_ID | uint32 time_stamp | uint8 appear |
+  #       float pitch,yaw | float target_yaw,target_pitch |
+  #       float enable_yaw_diff,enable_pitch_diff |
+  #       float v_yaw,v_pitch | float a_yaw,a_pitch | uint8 detect_color
+  #   1 = ASCII 文本帧（新，默认）:
+  #       AAP<pitch>Y<yaw>F<fire>N<frame>C<4位hex>%<LF>
+  #       例: AAP1.23Y-4.56F0N120Cc328%\n
+  #       pitch/yaw 单位为度；fire=0/1；frame 为帧计数；
+  #       C 后 4 位是 CRC（默认 CRC16-MCRF4XX，见下面的 crc_mode），
+  #       覆盖 'C' 之前的整段 ASCII；末尾 '%' 为字面量，'\n' 结束。
+  send_protocol: 1
+
+  # recv_protocol:
+  #   0 = 原有二进制包 ReceiveRobotData (cmd_ID=0x02):
+  #       uint8 cmd_ID | uint32 time_stamp_pc |
+  #       uint32 time_stamp_receive_micro | uint32 time_stamp_send_micro |
+  #       float yaw,pitch,roll | float vyaw,vpitch,vroll |
+  #       float v_x,v_y,v_z | float bullet_speed | uint8 detect_color |
+  #       uint32 bullet_count | float operator_yaw_offset,operator_pitch_offset
+  #   1 = ASCII 文本帧（新，默认），云台姿态用**四元数**上报:
+  #       ARQ<w>X<x>Y<y>Z<z>C<4位hex>%<LF>        （末尾 '%' 可省）
+  #       例: ARQ0.7071X0.0000Y0.7071Z0.0000C2dd9%\n
+  #       四元数 wxyz 顺序、单位化；C 后 4 位是 CRC，覆盖 'C' 之前的整段 ASCII。
+  recv_protocol: 1
+
+  # CRC 算法（只影响**发送**方向的 AAP 帧；接收方向两种都认，不会丢帧）:
+  #   mcrf4xx（默认）= 初值 0xFFFF、反射多项式 0x8408
+  #                    —— 下位机固件实际用的就是这个（实测 ARQ 帧 189/189 命中）
+  #   modbus         = 初值 0xFFFF、反射多项式 0xA001
+  #                    —— 早期文档/实现用的，若固件按 Modbus 校验再切回这个
+  crc_mode: mcrf4xx
+serial_send_to_image_microseconds: -2500
+use_sim: false
+
+# 视觉不再直接串口下发给底层板，改为发布话题、由导航统一下发：
+#   cmd_gimbal_joint (sensor_msgs/JointState, reliable)  云台角，语义见 nav_gimbal_mode
+#   cmd_shoot        (example_interfaces/UInt8, reliable) 0 停火 / >0 开火
+#   tracker/target   (auto_aim_interfaces/Target, SensorDataQoS) 只填 tracking
+# 需编译时开 ROS2（USE_ROS2）且 source 了含 auto_aim_interfaces 的工作空间。
+publish_to_nav: true
+
+# cmd_gimbal_joint 里 position[0]=pitch / position[1]=yaw 的语义：
+#   delta    : **增量**（相对"当前云台角"），由下位机自己叠加到当前角度上，
+#              和串口 AAP 帧的语义一致。丢目标时发 0/0，配合 cmd_shoot=0，
+#              下位机既可以用"fire/pitch/yaw 三零"判断丢失目标，也不会乱动
+#              （增量 0 = 别动）。
+#   absolute : 世界系绝对角(rad)（旧行为）。丢目标时**不发**，由导航锁存上一条，
+#              避免 0/0 被当成"世界系 yaw=0"而甩头。
+# ⚠️ 改成 delta 时，(a) 下位机必须按"叠加增量"处理而不是"设置绝对角"；
+#    (b) 增量基准取自下位机回传的 IMU 四元数，所以 IMU 回传必须是通的（否则
+#        基准恒为 0，等价于"目标相对相机的角度"，短时间能用但会累积漂移）。
+nav_gimbal_mode: delta
+# delta 模式下的单位：rad | deg（absolute 模式恒为 rad）
+nav_gimbal_units: rad
+
+record:
+ enable: false
+
+tf:
+  camera_in_gimbal:
+    t: [0.14,0.05,0.0]
+    R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
+  shoot_in_gimbal:
+    t: [0.2,0.0,0.0]
+    R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
+wheel_odometry:
+  q_xyz: [10.0,10.0,1.0]
+  r_vxyz: [0.05,0.05,0.05]
+
+bullet_pick_up:
+  ballistic_trajectory:
+    gravity: 9.8
+    resistance: 0.001
+  
+auto_exposure:
+  enable: true
+  # 25 ≈ 10% 平均亮度偏暗，号码分类容易读不准（no1/no2/outpost/none 乱跳）；
+  # 调亮一档再看日志里的 nocand 是否下降。
+  target_brightness: 45.0
+  tolerance: 3.0
+  step_gain: 18.0
+  decay_step: 1.0
+  exposure_min: 1200.0
+  # 250 fps → 每帧只有 4ms，曝光要留出读出/传输余量，否则会出现
+  # MV_CC_GetImageBuffer fail (0x80000007 = MV_E_NODATA，取流超时)。
+  # 想要更长曝光就把 acquisition_frame_rate 降到 150~200（检测本来只跑 ~100fps，
+  # 降帧不影响性能），那时这里可以放回 3500。
+  exposure_max: 2200.0
+  control_interval_ms: 300
+
+
+armor_detector:
+  max_infer_num: 3
+  backend: openvino
+  net_detector:
+    openvino:
+      model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
+      device_name: "CPU"
+      perf_mode: "THROUGHPUT"
+      # priority: "HIGH"   # OpenVINO 2025 CPU 插件不支持 MODEL_PRIORITY
+      # scheduling_core_type: "PCORE_ONLY"
+      execution_mode: "PERFORMANCE"
+      infer_request_buffer_num: 10
+    tensorrt:
+      model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
+      copy_context_num: 3
+      min_free_mem_ratio: 0.1
+      use_cuda_preproces: true
+    armor_infer:
+      model_type: tup
+      conf_threshold: 0.2
+  number_classifier:
+    enable: true
+    model_path: ${ROOT_DIR}/model/mlp.onnx
+    label_path: ${ROOT_DIR}/model/label.txt
+  color_classifier:
+    enable: true
+    diff_threshold: 20.0
+  cv:
+    light:
+      bin_threshold: 120.0
+      net_ref_threshold_tol: 50.0
+      min_wh_ratio: 0.001
+      max_wh_ratio: 0.4
+      max_angle: 40.0
+    armor:
+      min_ratio: 0.8
+      max_ratio: 5.0
+
+
+armor_tracker:
+  lost_time_thres: 1.5
+  lost_time_thres_outpost: 2.0
+  tracking_thres: 10
+  qxyz_common: [30.0, 30.0, 1.0]
+  qyaw_common: 30.0
+  qxyz_output: [1.0, 1.0, 1.0]
+  qyaw_output: 0.01
+  q_r: 0.0000001
+  q_l: 0.0000001
+  q_h: 0.0000001
+  q_wpr: 0.0000001
+  q_outpost_dz: 0.0000001
+  enable_lights_measure: true
+  armor_match_gate: 300.0
+  armor_match_gate_not_all_init: 1000.0
+  armor_match_w_center_err: 5.0
+  armor_match_w_angle_err: 10.0
+  armor_match_w_side_length_err: 1.0
+  light_match_length_ratio_gate: 0.2
+  light_match_angle_gate: 0.2
+  light_match_pos_gate_by_length_ratio: 5.0
+  r_sigma_px_by_length_ratio: 0.2
+  r_sigma_length_by_length_ratio: 0.5
+  r_sigma_angle: 0.5
+  r_sigma_armor_lights_depth_diff: 0.1
+  esekf_iter_num: 5
+
+
+
+
+
+
+
+
+
+auto_aim_fsm:
+  single_whole_up: 1.5 
+  single_whole_down: 1.0
+  whole_pair_up: 7.5 
+  whole_pair_down: 6.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
+  pair_center_up: 16.5
+  pair_center_down: 15.0
+  transfer_time: 0.5
+
+
+very_aimer:
+  type: mpc
+  base_yaw_offset: -0.5
+  base_pitch_offset: 6.0
+  # base_yaw_offset: -0.0
+  # base_pitch_offset: -0.0
+  sample_total_time: 1.0
+  
+  sample_horizon: 200
+
+  fire_delay_min: 0.03
+  fire_delay_max: 0.07
+  
+  max_yaw_acc: 40
+  max_pitch_acc: 50
+  
+
+  prediction_delay: 0.00
+  aim_center_more_prediction_time: 0.0
+
+  shooting_range_h: 0.12
+  shooting_range_w_small: 0.12
+  shooting_range_w_large: 0.24
+  min_enable_pitch_deg: 0.25
+  min_enable_yaw_deg: 0.25
+  ballistic_trajectory:
+    gravity: 9.8
+    resistance: 0.001
+
+rune_detector:
+  max_infer_num: 2
+  backend: openvino
+  net_detector:
+    openvino:
+      model_path: ${ROOT_DIR}/model/cb_rune.onnx
+      device_name: "CPU"
+      perf_mode: "THROUGHPUT"
+      # priority: "HIGH"   # OpenVINO 2025 CPU 插件不支持 MODEL_PRIORITY
+      # scheduling_core_type: "PCORE_ONLY"
+      execution_mode: "PERFORMANCE"
+      infer_request_buffer_num: 10
+    tensorrt:
+      model_path: ${ROOT_DIR}/model/cb_rune.onnx
+      copy_context_num: 3
+      min_free_mem_ratio: 0.1
+      use_cuda_preproces: true
+    rune_infer:
+      model_type: cb
+      conf_threshold: 0.2
+  cv:
+    bin_threshold: 70
+    color_diff_thresh: 10
+    rune_r_min_area: 1
+    rune_r_max_area: 999999999
+    rune_r_1x1ratio_tol: 0.7
+    rune_r_fill_ratio_min: 0.1
+    rune_pan_min_area: 10
+    rune_pan_max_area: 99999999
+    rune_pan_cluster_radius: 70
+    rune_pan_max_square_ratio: 1.3
+
+
+rune_tracker:
+  lost_time_thres: 2.0
+  tracking_thres: 10
+  esekf_iter_num: 5
+  q_xyz: [0.0001, 0.0001, 0.0001]
+  q_yaw: 0.1
+  q_roll: 10.0
+  q_a: 0.01
+  q_w: 0.01
+  q_tau: 0.01
+  match_gate: 30.0
+  voter_state_need_count: 50
+  voter_mode_need_count: 20
+  big_args_continue_time: 1.0
+  r_sigma_pix_by_hand_length_ratio_cv: 0.05
+  r_sigma_pix_by_hand_length_ratio_net: 0.2
+
+rune_aimer:
+  base_yaw_offset: -0.0
+  base_pitch_offset: -0.5
+  sample_total_time: 0.5
+  sample_horizon: 10
+  prediction_delay: -0.00
+  max_yaw_acc: 40 
+  max_pitch_acc: 50
+  shooting_range_h: 0.12
+  shooting_range_w: 0.12
+  min_enable_pitch_deg: 0.25
+  min_enable_yaw_deg: 0.25
+  ballistic_trajectory:
+    gravity: 9.8
+    resistance: 0.001
+
+
+camera: 
+  type: hik
+  hik_camera:
+    #target_sn: DA4973922 #海康2
+    target_sn: 00J38611357 #海康1
+    adc_bit_depth: Bits_8
+    pixel_format: BayerRG8 #RGB8Packed
+    reverse_x: false
+    reverse_y: false
+    width: 1280
+    height: 720
+    center_roi: true    # OffsetX/OffsetY 按 WidthMax/HeightMax 自动居中，不写死
+    offset_x: 0         # 仅 center_roi=false 时生效
+    offset_y: 0
+    flip: "180"         # 相机倒装补偿：none/vertical/horizontal/180，识别前软件翻转
+    acquisition_frame_rate_enable: true
+    # 180 fps → 每帧 5.56ms；配合 auto_exposure.exposure_max=3000µs 留出 2.5ms
+    # 余量，避免 MV_CC_GetImageBuffer fail (MV_E_NODATA，取流超时)。
+    # 检测侧本来就只跑 ~100fps，180 对性能没有影响。
+    acquisition_frame_rate: 180
+    exposure_time: 2500
+    gain: 16.9
+    gamma: 0.7 #Bayer用不了
+    trigger_mode: Off
+    trigger_source: ""
+    trigger_activation: ""
+    format: "bgr" 
+    use_cuda_cvt: true
+  mv_camera:
+    frame_speed: 0
+    exposure_time: 2000
+    r_gain: 200
+    b_gain: 150
+    g_gain: 200
+    # analog_gain: 100.0
+    # gamma: 120
+  camera_info:
+    #8mm
+    # image_width: 1440
+    # image_height: 1080
+    # camera_name: narrow_stereo
+    # camera_matrix:
+    #   rows: 3
+    #   cols: 3
+    #   data: [2419.64498,    0.     ,  719.05623,
+    #             0.     , 2414.38209,  538.71651,
+    #             0.     ,    0.     ,    1.     ]
+    # distortion_model: plumb_bob
+    # distortion_coefficients:
+    #   rows: 1
+    #   cols: 5
+    #   data: [-0.033521, 0.087954, -0.002045, -0.001438, 0.000000]
+    # rectification_matrix:
+    #   rows: 3
+    #   cols: 3
+    #   data: [1., 0., 0.,
+    #          0., 1., 0.,
+    #          0., 0., 1.]
+    # projection_matrix:
+    #   rows: 3
+    #   cols: 4
+    #   data: [2413.22632,    0.     ,  717.5196 ,    0.     ,
+    #             0.     , 2408.83228,  537.43444,    0.     ,
+    #             0.     ,    0.     ,    1.     ,    0.     ]
+    #6mm
+
+    image_width: 1280
+    image_height: 720
+    camera_name: narrow_stereo
+    camera_matrix:
+      rows: 3
+      cols: 3
+      # data: [1796.894429809793,    0.     ,  620.0261636808025,
+      #           0.     , 1796.931221518718,  379.0978347802621,
+      #           0.     ,    0.     ,    1.     ]
+      data: [1796.894429809793,    0.     ,  658.0261636808025,
+                0.     , 1796.931221518718,  379.0978347802621,
+                0.     ,    0.     ,    1.     ]
+    distortion_model: plumb_bob
+    distortion_coefficients:
+      rows: 1
+      cols: 5
+      data: [-0.08924019639253641, 0.3763627652210577, -0.000139574350781996, -0.001426088285025369, -1.627646070279677]
+    rectification_matrix:
+      rows: 3
+      cols: 3
+      data: [1., 0., 0.,
+            0., 1., 0.,
+            0., 0., 1.]
+    projection_matrix:
+      rows: 3
+      cols: 4
+      data: [1796.894429809793,    0.     ,  620.0261636808025,    0.     ,
+                0.     , 1796.931221518718,  379.0978347802621,    0.     ,
+                0.     ,    0.     ,    1.     ,    0.     ]
+    #12mm
+    # image_width: 1440
+    # image_height: 1080
+    # camera_name: narrow_stereo
+    # camera_matrix:
+    #   rows: 3
+    #   cols: 3
+    #   data: [3655.11292,    0.     ,  748.66803,
+    #             0.     , 3648.34439,  556.97683,
+    #             0.     ,    0.     ,    1.     ]
+    # distortion_model: plumb_bob
+    # distortion_coefficients:
+    #   rows: 1
+    #   cols: 5
+    #   data: [-0.058763, 1.430269, 0.001191, 0.001641, 0.000000]
+    # rectification_matrix:
+    #   rows: 3
+    #   cols: 3
+    #   data: [1., 0., 0.,
+    #          0., 1., 0.,
+    #          0., 0., 1.]
+    # projection_matrix:
+    #   rows: 3
+    #   cols: 4
+    #   data: [3659.22949,    0.     ,  748.71496,    0.     ,
+    #             0.     , 3652.02661,  556.81908,    0.     ,
+    #             0.     ,    0.     ,    1.     ,    0.     ]
