@@ -357,26 +357,46 @@ struct Web::Impl {
                     cmd.aim_point.pose
                 );
                 constexpr double R = 0.02;
-                // 准星不再画在 cmd.aim_point 上：那个点是"击发时刻"的未来点，其高度/深度
-                // 来自状态估计，逐帧抖 ±35px，画出来就是准星相对装甲板上下飘。
-                // 这里吸附到最近的"预测装甲板中心"——预测框和检测的误差只有 ±2px，稳。
+                // 这里的红圈+十字 = **要击打的装甲板在击发时刻的位置**（提前量）：
+                // cmd.aim_point 就是 very_aimer 对"子弹飞到目标那一刻"解算出来的装甲板位置，
+                // 云台实际瞄的就是它。4 个彩色预测框是装甲板"现在"的位置，
+                // 两者的差就是提前量，所以再画一条细线连过去，一眼能看出提前了多少。
                 cv::Point2f center = aim_point_img_points[0];
-                double depth = cmd.aim_point.pose.translation().z();
+                const double depth = cmd.aim_point.pose.translation().z();
+                const double r = camera_info.camera_matrix.at<double>(0, 0) * R / depth;
+                const auto aim_color = cv::Scalar(50, 50, 255);
+                cv::circle(img, center, r, aim_color, 2);
+                {
+                    constexpr int CROSS = 14;
+                    cv::line(
+                        img,
+                        center + cv::Point2f(-CROSS, 0),
+                        center + cv::Point2f(CROSS, 0),
+                        aim_color,
+                        2,
+                        cv::LINE_AA
+                    );
+                    cv::line(
+                        img,
+                        center + cv::Point2f(0, -CROSS),
+                        center + cv::Point2f(0, CROSS),
+                        aim_color,
+                        2,
+                        cv::LINE_AA
+                    );
+                }
                 if (!plate_centers.empty()) {
-                    std::size_t best = 0;
-                    double best_dis = std::numeric_limits<double>::max();
-                    for (std::size_t i = 0; i < plate_centers.size(); ++i) {
+                    cv::Point2f nearest = plate_centers[0];
+                    double best_dis = cv::norm(nearest - center);
+                    for (std::size_t i = 1; i < plate_centers.size(); ++i) {
                         const double dis = cv::norm(plate_centers[i] - center);
                         if (dis < best_dis) {
                             best_dis = dis;
-                            best = i;
+                            nearest = plate_centers[i];
                         }
                     }
-                    center = plate_centers[best];
-                    depth = plate_depths[best];
+                    cv::line(img, nearest, center, cv::Scalar(120, 120, 255), 1, cv::LINE_AA);
                 }
-                double r = camera_info.camera_matrix.at<double>(0, 0) * R / depth;
-                cv::circle(img, center, r, cv::Scalar(50, 50, 255), 2);
                 // if (cmd.fire_advice) {
                 //     int size = 50;
                 //     cv::line(
