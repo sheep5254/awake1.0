@@ -119,10 +119,20 @@ struct ArmorTracker::Impl {
         std::vector<Armor> candidates;
         candidates.reserve(armors.armors.size());
         for (const auto& a: armors.armors) {
-            if (a.number == target.target_number && a.color != ArmorColor::NONE
-                && a.color != ArmorColor::PURPLE)
-            {
+            if (a.color == ArmorColor::NONE || a.color == ArmorColor::PURPLE) {
+                continue;
+            }
+            if (a.number == target.target_number) {
                 candidates.emplace_back(a);
+            } else if (a.number == ArmorClass::UNKNOWN) {
+                // 【别因为号码没判出来就丢观测】暗光/斜看时分类器频繁给 UNKNOWN（实测占
+                // 被拒观测的 97%），而更新路径原来要求 number 严格相等 → 这些帧全部丢掉
+                // → last_update 不变 → 输出状态被冻结，表现为"板子跑走了、识别坐标系还在
+                // 原地"。号码只用来定装甲板尺寸，这里按**已锁定的目标号码**解释这块板，
+                // 几何/运动照常参与更新；target_number 本身不会被改写。
+                Armor a_known = a;
+                a_known.number = target.target_number;
+                candidates.emplace_back(std::move(a_known));
             }
             // if (a.number == target.target_number)
             // {

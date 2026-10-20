@@ -1,6 +1,6 @@
 mode: auto_aim
 enemy_color: red
-bullet_speed: 22.0
+bullet_speed: 21.0
 
 # 逐帧诊断记录（纯写文件，不影响任何处理逻辑）
 #   文件固定为 record/auto_aim/run.jsonl，**每次启动自瞄都会覆盖上一次的**。
@@ -293,7 +293,7 @@ rune_tracker:
   r_sigma_pix_by_hand_length_ratio_net: 0.2
 
 rune_aimer:
-  base_yaw_offset: -0.0
+  base_yaw_offset: 1.0
   base_pitch_offset: -0.5
   sample_total_time: 0.5
   sample_horizon: 10

@@ -851,14 +851,24 @@ int main(int argc, char** argv) {
                         last_seen_update = __armor_target.last_update;
                         last_seen_pos = __armor_target.get_target_state().pos();
                     } else {
+                        // 丢观测但时间还短(<0.2s)：车心按上一拍的速度继续滑行（track 内部
+                        // 已经做过 predict_ekf），只把**高度**钉住（高度没有速度状态、且
+                        // 装甲板 PnP 深度偏置会把它带抖）。超过 0.2s 才整体冻结，防止长
+                        // 时间丢板时状态"飞走"（实测丢 1.9s 车心从 2.5m 推到 9.9m）。
+                        // 这样快速移动的板子不会拖出一段原地不动的坐标系。
+                        const double age =
+                            std::chrono::duration<double>(Clock::now() - last_seen_update).count();
+                        const bool stale = age > 0.2;
                         __armor_target.set_target_state_keep_id([&](auto& s) {
                             namespace idx = auto_aim::armor_point_motion_model::idx;
-                            s.x[idx::CX] = last_seen_pos.x();
-                            s.x[idx::CY] = last_seen_pos.y();
                             s.x[idx::CZ] = last_seen_pos.z();
-                            s.x[idx::VCX] = 0.0;
-                            s.x[idx::VCY] = 0.0;
                             s.x[idx::VCZ] = 0.0;
+                            if (stale) {
+                                s.x[idx::CX] = last_seen_pos.x();
+                                s.x[idx::CY] = last_seen_pos.y();
+                                s.x[idx::VCX] = 0.0;
+                                s.x[idx::VCY] = 0.0;
+                            }
                         });
                     }
                 }
