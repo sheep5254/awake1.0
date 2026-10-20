@@ -3,9 +3,12 @@
 #include "tasks/auto_aim/type.hpp"
 #include "tasks/base/dta_utils.hpp"
 #include "utils/logger.hpp"
+#include "utils/utils.hpp"
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <opencv2/core.hpp>
+#include <opencv2/core/types.hpp>
 #include <utility>
 #include <vector>
 namespace awakening::auto_aim {
@@ -77,10 +80,17 @@ struct ArmorTracker::Impl {
         const auto valid_target = [&](Armor& armor) {
             const bool valid_color =
                 armor.color != ArmorColor::NONE && armor.color != ArmorColor::PURPLE;
-            // 【修源码 bug】号码决定板尺寸（no1/outpost 走大板几何）：分类器明确判 UNKNOWN
-            // 的板不能拿来 init，否则会按错误的板尺寸解 PnP，位置直接错到相机旁边。
-            const bool number_ok = !armor.number_classifier
-                || armor.number_classifier->number != ArmorClass::UNKNOWN;
+            // 号码决定板尺寸（no1/outpost 走大板几何）。分类器判 UNKNOWN 时**不能**因此
+            // 拒绝 init——实测"画面里明明有板、号码 UNKNOWN"能连续卡近 1s 不发布任何指令
+            // （最长 993ms 没有 appear）。
+            // 为什么按小板默认：单目下"板尺寸↔深度"不可分（尺寸放大 1.7 倍、深度同样放大
+            // 1.7 倍，投影完全一样），没有任何几何量能判出大小板。默认 133mm 小板覆盖
+            // 哨兵/步兵；若对手是英雄(225mm 大板)，距离会读成 1.7 倍近，但那块板在图像上
+            // 的视线方向不变，云台 yaw/pitch 仍然是准的，只影响弹道提前量。
+            if (armor.number_classifier && armor.number == ArmorClass::UNKNOWN) {
+                armor.number = ArmorClass::NO2;
+            }
+            const bool number_ok = armor.number != ArmorClass::UNKNOWN;
             const bool keep_outpost =
                 target_buf_[cur_target_idx_].target_number == ArmorClass::OUTPOST
                 && armor.number != ArmorClass::OUTPOST && target_buf_[cur_target_idx_].check();
