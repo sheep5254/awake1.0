@@ -4,8 +4,8 @@ devel
 
 install
 
-log/*
-record/*
+log/
+record/
 .catkin_workspace
 
 .vscode
@@ -33,3 +33,12 @@ model/at.onnx
 model/at.engine
 Camera
 output
+
+# ---- 本地运行产物（每次跑都会变，不入库，删了也能重新生成）----
+MvSdkLog/
+.roslog/
+*.avi
+
+# ---- 本地备份/工具缓存（不入库）----
+.backup_*/
+.dsh-code-index/

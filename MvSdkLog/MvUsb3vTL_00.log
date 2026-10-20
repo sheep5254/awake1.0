@@ -1,6 +1,0 @@
-Info    2026-10-09 18:39:10:647  DevID:MV-CA016-10UC(00J38611357)  Source-Line:libMvUsb3vTL.so(Manager.cpp-L0149)  ProcessName:standard(26217)     Description:[Init]Current dynamic library path[/opt/MVS/lib/64/libMvUsb3vTL.so]
-Info    2026-10-09 18:39:10:647  DevID:MV-CA016-10UC(00J38611357)  Source-Line:libMvUsb3vTL.so(Manager.cpp-L0151)  ProcessName:standard(26217)     Description:[Init]U3V_Version: 4.5.0.3, U3V_Description: BaseLine Build 20241126
-Info    2026-10-09 18:39:10:648  DevID:MV-CA016-10UC(00J38611357)  Source-Line:libMvUsb3vTL.so(Manager.cpp-L0795)  ProcessName:standard(26217)     Description:[ConnectDevice][UpdateUsbDeviceType] Dev SerialNum:[00J38611357], Type[0] (0-Stand; 1-MasterWithSlaver; 2-justMaster)
-Info    2026-10-09 18:39:10:648  DevID:MV-CA016-10UC(00J38611357)  Source-Line:libMvUsb3vTL.so(DriverLayer.cpp-L1048)  ProcessName:standard(26217)     Description:[OpenDevice]device speed: [0x4]
-Error   2026-10-09 18:39:10:648  DevID:MV-CA016-10UC(00J38611357)  Source-Line:libMvUsb3vTL.so(DriverLayer.cpp-L1094)  ProcessName:standard(26217)     Description:[OpenDevice][usb_claim_interface] failed
-Error   2026-10-09 18:39:10:648  DevID:MV-CA016-10UC(00J38611357)  Source-Line:libMvUsb3vTL.so(Manager.cpp-L0817)  ProcessName:standard(26217)     Description:[ConnectDevice]Open device failed, Ret[0x80000203]
