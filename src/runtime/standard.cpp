@@ -326,13 +326,6 @@ int main(int argc, char** argv) {
     auto_aim::ArmorDetector armor_detector(config["armor_detector"]);
     auto_aim::ArmorTracker armor_tracker(config["armor_tracker"]);
     auto_aim::AutoAimFsmController auto_aim_fsm_controller(config["auto_aim_fsm"]);
-    // 【小陀螺改瞄车心】|vyaw| 超过这个值就直接瞄车心（车心是旋转不变点，瞄准点不会因为
-    // 换板而跳 13°）。FSM 原来的升级条件依赖 target_jumped 连续累积 transfer_time(0.5s)、
-    // 且 pair_center_up=16.5rad/s 高得几乎用不上，小陀螺时实际一直是 AIM_SINGLE_ARMOR。
-    // 0 = 关闭，完全沿用原 FSM 行为。
-    const double vyaw_center_thresh = config["auto_aim_fsm"]["vyaw_center_thresh"]
-        ? config["auto_aim_fsm"]["vyaw_center_thresh"].as<double>()
-        : 4.0;
     auto_aim::VeryAimer very_aimer(config["very_aimer"]);
     auto_buff::RuneDetector rune_detector(config["rune_detector"]);
     auto_buff::RuneTracker rune_tracker(config["rune_tracker"]);
@@ -1194,18 +1187,10 @@ int main(int argc, char** argv) {
         static ShootControlSend shoot_send;
         if (a_target.check()) {
             very_aimer.set_operator_offset(operator_offset);
-            // 小陀螺（角速度超过阈值）直接瞄车心：换板会让瞄准点每 0.245s 跳一次 13°，
-            // 轨迹加速度限幅追不上，实测恒定滞后 2~3.5°；车心不随旋转跳，瞄它才稳。
-            auto fsm_state = auto_aim_fsm_controller.get_state();
-            if (vyaw_center_thresh > 0.0
-                && std::abs(a_target.get_target_state().vyaw()) > vyaw_center_thresh)
-            {
-                fsm_state = auto_aim::AutoAimFsm::AIM_WHOLE_CAR_CENTER;
-            }
             cmd = very_aimer.very_aim(
                 a_target,
                 bullet_speed,
-                fsm_state,
+                auto_aim_fsm_controller.get_state(),
                 shoot_in_gimbal_odom,
                 gimbal_in_gimbal_odom
             );
@@ -1508,17 +1493,7 @@ int main(int argc, char** argv) {
                 auto img_now = dbg->img_frame.get().timestamp;
                 dbg->armor_target.set(__armor_target);
                 dbg->rune_target.set(__rune_target);
-                {
-                    // 屏幕上显示的模式要和实际瞄准用的模式一致（含小陀螺切车心的覆盖）
-                    auto dbg_fsm = auto_aim_fsm_controller.get_state();
-                    if (vyaw_center_thresh > 0.0
-                        && std::abs(__armor_target.get_target_state().vyaw())
-                            > vyaw_center_thresh)
-                    {
-                        dbg_fsm = auto_aim::AutoAimFsm::AIM_WHOLE_CAR_CENTER;
-                    }
-                    dbg->auto_aim_fsm_state.set(dbg_fsm);
-                }
+                dbg->auto_aim_fsm_state.set(auto_aim_fsm_controller.get_state());
                 auto gimbal_in_gimbal_odom =
                     tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
                 auto rpy =
