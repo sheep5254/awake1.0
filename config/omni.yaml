@@ -214,6 +214,11 @@ auto_aim_fsm:
   pair_center_up: 16.5
   pair_center_down: 15.0
   transfer_time: 0.5
+  # 【小陀螺瞄车心】|vyaw| 超过这个值(rad/s)直接切 AIM_WHOLE_CAR_CENTER。
+  # 原 FSM 的升级要靠 target_jumped 连续累积 0.5s，实战基本升不上去；而 6 rad/s 时
+  # 每 0.245s 换一次板、瞄准点跳 13°，轨迹加速度追不上 → 恒定滞后 2~3.5°（画面上
+  # 就是"小陀螺时板的位置跟静止时不一样"）。车心是旋转不变点，瞄它不跳。0 = 关闭。
+  vyaw_center_thresh: 4.0
 
 
 very_aimer:
