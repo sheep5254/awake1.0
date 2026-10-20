@@ -230,7 +230,12 @@ very_aimer:
   max_pitch_acc: 50
   
 
-  prediction_delay: 0.00
+  # 【击发提前量补偿】在弹道飞行时间之外，再按这个时间预测装甲板位置（单位 s）。
+  # 总提前量 = 弹道飞行时间(≈距离/22，2m 时约 0.09s) + prediction_delay。
+  # 整条链路（曝光→推理→串口→云台响应）有百毫秒级延迟，小陀螺时按飞行时间瞄
+  # 永远落在板子后面，所以这里额外补一段。0.10 → 总提前量约 0.19s；嫌大就调小，
+  # 完全按物理弹道瞄就设回 0.00。
+  prediction_delay: 0.10
   aim_center_more_prediction_time: 0.0
 
   shooting_range_h: 0.12
