@@ -26,6 +26,17 @@ struct ArmorTracker::Impl {
             bool found = (t.track_state.tracker_state == ArmorTarget::TrackState::LOST)
                 ? init_target(t, armors, frame_id, camera_info, camera_cv_in_odom)
                 : update_target(t, armors, camera_info, camera_cv_in_odom);
+            // 【重捕获】板子明明检到了，却连续 relock_time_thres 秒更新不上（匹配被门限
+            // 全拒 / 内部预测已经偏了）：不要再空推到 lost_time_thres(1.5s) 才恢复，
+            // 直接把这个检测当新目标重新初始化。否则这段时间预测框、车坐标系都钉在旧
+            // 位置，就是"画面里明明识别到装甲板，可画出来的小车坐标系飞了"。
+            if (!found && t.track_state.tracker_state != ArmorTarget::TrackState::LOST
+                && dta_utils::elapsed_sec(t.last_update, armors.timestamp)
+                    > cfg_.relock_time_thres)
+            {
+                t.track_state.tracker_state = ArmorTarget::TrackState::LOST;
+                found = init_target(t, armors, frame_id, camera_info, camera_cv_in_odom);
+            }
             update_fsm(found, idx, armors.timestamp);
             return found;
         };

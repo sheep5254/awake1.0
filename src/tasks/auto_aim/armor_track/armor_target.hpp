@@ -19,6 +19,10 @@ struct ArmorTrackerCfg {
     int tracking_thres;
     // DETECTING 期间允许连续几次漏检（见 dta_utils::update_fsm）。0 = 旧行为。
     int detecting_miss_tol = 3;
+    // 板子检到了但连续这么久没能更新成功（匹配全被门限拒/预测偏了），就直接当新目标
+    // 重新初始化，别一直空推到 lost_time_thres(1.5s)——否则预测框/车坐标系会钉在原地，
+    // 表现为"识别到了但画出来的东西飞了"。
+    double relock_time_thres = 0.3;
     double armor_match_gate;
     double armor_match_gate_not_all_init;
     double armor_match_w_center_err;
@@ -47,6 +51,8 @@ struct ArmorTrackerCfg {
         tracking_thres = config["tracking_thres"].as<int>();
         detecting_miss_tol =
             config["detecting_miss_tol"] ? config["detecting_miss_tol"].as<int>() : 3;
+        relock_time_thres =
+            config["relock_time_thres"] ? config["relock_time_thres"].as<double>() : 0.3;
         armor_match_gate = config["armor_match_gate"].as<double>();
         armor_match_gate_not_all_init = config["armor_match_gate_not_all_init"].as<double>();
         armor_match_w_center_err = config["armor_match_w_center_err"].as<double>();
