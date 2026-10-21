@@ -90,14 +90,19 @@ namespace awakening::record {
     }
 
     // 一包 IMU（云台四元数）的原始快照，用来检查"IMU 本身是否有问题"：
-    //   wall_ns   = 收到这包的 host 时刻
+    //   wall_ns   = 解析任务的 host 时刻（兼容旧字段；实际收包时刻见 host_received_ns）
     //   packet_ns = 写进 tf 的时间戳（= wall - serial_send_to_image_microseconds）
     //   dq_deg / rate_dps = 与上一包之间的姿态差 / 换算出的角速度
     //                       （用来抓跳变、卡包、尖峰，以及和真实角速度对不上）
-    //   seq / bad = 累计解析成功 / 失败包数（看丢包）
+    //   seq / bad = 主机累计解析成功 / 失败计数，不是 MCU 序号，不能直接测量丢包
     struct ImuSample {
         int64_t wall_ns = 0;
         int64_t packet_ns = 0;
+        int64_t host_received_ns = 0;
+        int64_t host_received_steady_ns = 0;
+        uint64_t host_chunk_seq = 0;
+        bool raw_quaternion_available = false;
+        double raw_w = 0, raw_x = 0, raw_y = 0, raw_z = 0, raw_norm = 0;
         double w = 1.0;
         double x = 0.0;
         double y = 0.0;
