@@ -30,6 +30,7 @@ struct VeryAimer::Impl {
         double min_enable_pitch_deg;
         double min_enable_yaw_deg;
         bool aim_z_from_car_center = false;
+        double aim_z_offset = 0.12;
 
         void load(const YAML::Node& config) {
             sample_total_time = config["sample_total_time"].as<double>();
@@ -49,6 +50,7 @@ struct VeryAimer::Impl {
             aim_z_from_car_center = config["aim_z_from_car_center"]
                 ? config["aim_z_from_car_center"].as<bool>()
                 : false;
+            aim_z_offset = config["aim_z_offset"] ? config["aim_z_offset"].as<double>() : 0.12;
         }
     } params_;
     using MPCType = dta_utils::TinyMpcTrajectory;
@@ -252,11 +254,11 @@ struct VeryAimer::Impl {
             if (!z_valid) {
                 z_ref = z_meas;
                 z_valid = true;
-            } else if (std::abs(target_state.vyaw()) < 1.0) {
+            } else if (std::abs(target_state.vyaw()) < 3.0) {
                 constexpr double Z_TAU = 3.0;
                 z_ref += z_dt / (Z_TAU + z_dt) * (z_meas - z_ref);
             }
-            armors_pose[selected_armor].translation().z() = z_ref;
+            armors_pose[selected_armor].translation().z() = z_ref + params_.aim_z_offset;
         }
         return get_control_point(
             armors_pose[selected_armor],
