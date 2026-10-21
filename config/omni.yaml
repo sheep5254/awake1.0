@@ -252,6 +252,10 @@ very_aimer:
   shooting_range_w_large: 0.24
   min_enable_pitch_deg: 0.25
   min_enable_yaw_deg: 0.25
+  # 【瞄准点高度】false=用状态里那块板的 3D 高度（会被车体倾斜/半径的弱可观漂移带偏）；
+  # true=直接把瞄准点高度换成车心 CZ（4 块板等高、都在车心高度上，竖直不再漂）。
+  # 实测竖直漂移 ±0.1m ≈ ±4°，先试 true 对比一轮。
+  aim_z_from_car_center: true
   ballistic_trajectory:
     gravity: 9.8
     resistance: 0.001

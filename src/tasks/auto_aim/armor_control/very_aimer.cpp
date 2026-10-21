@@ -29,6 +29,7 @@ struct VeryAimer::Impl {
         double shooting_range_w_large;
         double min_enable_pitch_deg;
         double min_enable_yaw_deg;
+        bool aim_z_from_car_center = false;
 
         void load(const YAML::Node& config) {
             sample_total_time = config["sample_total_time"].as<double>();
@@ -45,6 +46,9 @@ struct VeryAimer::Impl {
             shooting_range_w_large = config["shooting_range_w_large"].as<double>();
             min_enable_pitch_deg = config["min_enable_pitch_deg"].as<double>();
             min_enable_yaw_deg = config["min_enable_yaw_deg"].as<double>();
+            aim_z_from_car_center = config["aim_z_from_car_center"]
+                ? config["aim_z_from_car_center"].as<bool>()
+                : false;
         }
     } params_;
     using MPCType = dta_utils::TinyMpcTrajectory;
@@ -221,6 +225,33 @@ struct VeryAimer::Impl {
             center_xy_dis -= target_state.get_armor_r(selected_armor, target.target_number);
             armors_pose[selected_armor].translation().x() = center_xy_dis * std::cos(center_yaw);
             armors_pose[selected_armor].translation().y() = center_xy_dis * std::sin(center_yaw);
+        }
+        if (params_.aim_z_from_car_center) {
+            // 【瞄准点高度改用车心】单块平板观测下，车体系倾斜/半径在状态里是弱可观的
+            // （实测 tilt 会漂到 ±30°、r1 在 0.19~0.52 之间乱跳），它们会把"要击打那块板"
+            // 的高度带偏 ±0.1m（1.4m 处 ≈ ±4°）；而同一台机器人 4 块板高度相同、都在车心
+            // 高度上。这里把瞄准点的 z 直接换成车心 CZ，消掉这部分竖直漂移（水平照旧跟板）。
+            // 车心高度本身也会慢漂（实测 0.16m/60s），瞄准用的高度再做一个 tau=5s 低通：
+            // 同一段时间内炮口高度是稳的，不会跟着状态慢慢往下走（慢漂的平均值仍是真实高度）。
+            static double cz_lp = 0.0;
+            static bool cz_valid = false;
+            static TimePoint cz_tp {};
+            const auto cz_now = Clock::now();
+            double cz_dt = 0.02;
+            if (cz_valid) {
+                cz_dt = std::chrono::duration<double>(cz_now - cz_tp).count();
+            }
+            cz_dt = std::clamp(cz_dt, 0.001, 0.2);
+            constexpr double CZ_TAU = 5.0;
+            const double cz_meas = target_state.pos().z();
+            if (cz_valid) {
+                cz_lp += cz_dt / (CZ_TAU + cz_dt) * (cz_meas - cz_lp);
+            } else {
+                cz_lp = cz_meas;
+                cz_valid = true;
+            }
+            cz_tp = cz_now;
+            armors_pose[selected_armor].translation().z() = cz_lp;
         }
         return get_control_point(
             armors_pose[selected_armor],
