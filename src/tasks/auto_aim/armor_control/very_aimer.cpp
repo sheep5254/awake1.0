@@ -245,7 +245,10 @@ struct VeryAimer::Impl {
             }
             z_dt = std::clamp(z_dt, 0.001, 0.2);
             z_tp = z_now_tp;
-            const double z_meas = target_state.pos().z();
+            // 注意：参考高度取**这块装甲板**的 z（= 车心 + 模型给的高度偏移），不是车心 z。
+            // 之前用 target_state.pos().z() 当参考，会让红圈（瞄准点）整体比装甲板低
+            // ~0.08m（实测 98px ≈ 3.1°），等于枪口一直偏低。
+            const double z_meas = armors_pose[selected_armor].translation().z();
             if (!z_valid) {
                 z_ref = z_meas;
                 z_valid = true;
