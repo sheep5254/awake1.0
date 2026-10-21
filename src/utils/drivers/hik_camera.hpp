@@ -19,8 +19,9 @@ namespace awakening {
 class HikCamera: public Camera {
 public:
     struct Frame {
-        MV_FRAME_OUT out_frame;
+        MV_FRAME_OUT out_frame {};
         TimePoint timestamp;
+        CaptureTiming capture_timing {};
     };
     HikCamera(const YAML::Node& config, Scheduler& scheduler):
         Camera(&scheduler),
@@ -40,6 +41,7 @@ public:
     bool is_running() const override {
         return running_;
     }
+    void stamp_frame(Frame& frame, const TimePoint& host_time);
     ImageFrame read() override;
     bool start_capture() override;
     template<typename Tag>
@@ -74,10 +76,7 @@ public:
             if (n_ret == MV_OK) {
                 const auto current_time = Clock::now();
 
-                const auto half_exposure =
-                    std::chrono::microseconds(static_cast<long>(get_ExposureTime() / 2));
-
-                frame.timestamp = current_time - half_exposure;
+                stamp_frame(frame, current_time);
                 auto img_frame = to_image_frame(frame);
                 scheduler_ref_.runtime_push_source<IO>(
                     source_snapshot_id_,

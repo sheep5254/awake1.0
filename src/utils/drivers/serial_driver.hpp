@@ -15,6 +15,14 @@
 
 namespace awakening {
 
+// Only the standard runtime opts into this payload. Other runtimes keep vector.
+struct SerialReadChunk : std::vector<uint8_t> {
+    using std::vector<uint8_t>::vector;
+    std::chrono::system_clock::time_point host_received_time {};
+    int64_t host_received_steady_ns = 0;
+    uint64_t host_chunk_seq = 0;
+};
+
 class SerialDriver {
 public:
     struct Params {
@@ -56,9 +64,9 @@ public:
         }
     }
 
-    template<typename Tag>
+    template<typename Tag, typename Payload = std::vector<uint8_t>>
     void start(std::string source_name) {
-        using IO = IOPair<Tag, std::vector<uint8_t>>;
+        using IO = IOPair<Tag, Payload>;
         source_snapshot_id_ = scheduler_.register_source<IO>(source_name);
 
         running_ = true;
@@ -182,6 +190,9 @@ private:
         port_.async_read_some(
             boost::asio::buffer(read_buf_),
             [this, gen](boost::system::error_code ec, size_t n) {
+                const auto host_received_time = std::chrono::system_clock::now();
+                const auto host_received_steady_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
                 if (gen != generation_)
                     return;
 
@@ -194,7 +205,12 @@ private:
                 }
 
                 if (n > 0) {
-                    std::vector<uint8_t> buf(read_buf_.data(), read_buf_.data() + n);
+                    typename IO::second_type buf(read_buf_.data(), read_buf_.data() + n);
+                    if constexpr (requires { buf.host_received_time; }) {
+                        buf.host_received_time = host_received_time;
+                        buf.host_received_steady_ns = host_received_steady_ns;
+                        buf.host_chunk_seq = ++host_chunk_seq_;
+                    }
 
                     scheduler_.runtime_push_source<IO>(
                         source_snapshot_id_,
@@ -248,6 +264,7 @@ private:
     boost::asio::serial_port port_;
 
     std::vector<uint8_t> read_buf_;
+    uint64_t host_chunk_seq_ = 0;
     std::deque<std::vector<uint8_t>> write_queue_;
 
     std::atomic<bool> running_;
