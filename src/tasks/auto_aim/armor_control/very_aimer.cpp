@@ -231,27 +231,29 @@ struct VeryAimer::Impl {
             // （实测 tilt 会漂到 ±30°、r1 在 0.19~0.52 之间乱跳），它们会把"要击打那块板"
             // 的高度带偏 ±0.1m（1.4m 处 ≈ ±4°）；而同一台机器人 4 块板高度相同、都在车心
             // 高度上。这里把瞄准点的 z 直接换成车心 CZ，消掉这部分竖直漂移（水平照旧跟板）。
-            // 车心高度本身也会慢漂（实测 0.16m/60s），瞄准用的高度再做一个 tau=5s 低通：
-            // 同一段时间内炮口高度是稳的，不会跟着状态慢慢往下走（慢漂的平均值仍是真实高度）。
-            static double cz_lp = 0.0;
-            static bool cz_valid = false;
-            static TimePoint cz_tp {};
-            const auto cz_now = Clock::now();
-            double cz_dt = 0.02;
-            if (cz_valid) {
-                cz_dt = std::chrono::duration<double>(cz_now - cz_tp).count();
+            // 单块板的 PnP 高度在自旋时是歧义的（实测自旋 20s 内摆 ±0.12m，CZ 摆 0.26m），
+            // 用它去瞄就是"打着打着枪口慢慢低/高"。但目标的高度物理上是常数——所以这里维护
+            // 一个**只在目标慢转/静止时更新**的高度参考（tau=3s），自旋期间保持不动：
+            // 自旋时炮口高度就不会跟着估计漂，自旋停下后 3s 内自动收敛。
+            static double z_ref = 0.0;
+            static bool z_valid = false;
+            static TimePoint z_tp {};
+            const auto z_now_tp = Clock::now();
+            double z_dt = 0.02;
+            if (z_valid) {
+                z_dt = std::chrono::duration<double>(z_now_tp - z_tp).count();
             }
-            cz_dt = std::clamp(cz_dt, 0.001, 0.2);
-            constexpr double CZ_TAU = 5.0;
-            const double cz_meas = target_state.pos().z();
-            if (cz_valid) {
-                cz_lp += cz_dt / (CZ_TAU + cz_dt) * (cz_meas - cz_lp);
-            } else {
-                cz_lp = cz_meas;
-                cz_valid = true;
+            z_dt = std::clamp(z_dt, 0.001, 0.2);
+            z_tp = z_now_tp;
+            const double z_meas = target_state.pos().z();
+            if (!z_valid) {
+                z_ref = z_meas;
+                z_valid = true;
+            } else if (std::abs(target_state.vyaw()) < 1.0) {
+                constexpr double Z_TAU = 3.0;
+                z_ref += z_dt / (Z_TAU + z_dt) * (z_meas - z_ref);
             }
-            cz_tp = cz_now;
-            armors_pose[selected_armor].translation().z() = cz_lp;
+            armors_pose[selected_armor].translation().z() = z_ref;
         }
         return get_control_point(
             armors_pose[selected_armor],
