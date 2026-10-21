@@ -11,8 +11,6 @@ bullet_speed: 21.0
 #   的 record: enable: false），重名会被 YAML 覆盖、把录屏一起打开。
 frame_log:
   enable: true
-  # Async per-packet/camera/final-command diagnostics; one new directory per run.
-  diagnostics: true
 
 serial:
   enable: true

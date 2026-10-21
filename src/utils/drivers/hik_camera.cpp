@@ -115,28 +115,9 @@ ImageFrame HikCamera::read() {
     }
 
     const auto current_time = Clock::now();
-    stamp_frame(frame, current_time);
+    const auto half_exposure = std::chrono::microseconds(static_cast<long>(get_ExposureTime() / 2));
+    frame.timestamp = current_time - half_exposure;
     return to_image_frame(frame);
-}
-
-void HikCamera::stamp_frame(Frame& frame, const TimePoint& host_time) {
-    const auto buffer_steady = std::chrono::steady_clock::now();
-    const double exposure_us = get_ExposureTime();
-    const auto half_exposure = std::chrono::microseconds(static_cast<long>(exposure_us / 2));
-    frame.timestamp = host_time - half_exposure; // Preserve the existing control timestamp.
-    const auto& info = frame.out_frame.stFrameInfo;
-    auto& timing = frame.capture_timing;
-    timing.sdk_metadata_available = true;
-    timing.host_buffer_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        host_time.time_since_epoch()).count();
-    timing.host_buffer_steady_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        buffer_steady.time_since_epoch()).count();
-    timing.exposure_us = exposure_us;
-    timing.sdk_exposure_us = info.fExposureTime;
-    timing.hardware_frame_id = info.nFrameNum;
-    timing.device_timestamp_ticks = (uint64_t(info.nDevTimeStampHigh) << 32)
-                                  | uint64_t(info.nDevTimeStampLow);
-    timing.sdk_host_timestamp = info.nHostTimeStamp;
 }
 
 void HikCamera::restart() {
@@ -161,7 +142,6 @@ ImageFrame HikCamera::to_image_frame(Frame& f) {
     ImageFrame img_frame {
         .format = target_format_,
         .timestamp = f.timestamp,
-        .capture_timing = f.capture_timing,
     };
     const auto& info = f.out_frame.stFrameInfo;
     cv::Mat src(cv::Size(info.nWidth, info.nHeight), CV_8U, f.out_frame.pBufAddr);

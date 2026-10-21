@@ -1,6 +1,5 @@
 #pragma once
 #include "type_common.hpp"
-#include <cstdint>
 namespace awakening {
 enum class PixelFormat : int { BGR = 0, GRAY, RGB };
 inline PixelFormat string2PixelFormat(const std::string& str) {
@@ -13,23 +12,12 @@ inline PixelFormat string2PixelFormat(const std::string& str) {
 
     return PixelFormat::BGR; // Default
 }
-struct CaptureTiming {
-    bool sdk_metadata_available = false;
-    int64_t host_buffer_ns = 0;
-    int64_t host_buffer_steady_ns = 0;
-    double exposure_us = 0;
-    double sdk_exposure_us = 0;
-    uint64_t hardware_frame_id = 0;
-    uint64_t device_timestamp_ticks = 0;
-    int64_t sdk_host_timestamp = 0;
-};
 struct ImageFrame {
     cv::Mat src_img;
     PixelFormat format;
     TimePoint timestamp;
-    CaptureTiming capture_timing {};
     ImageFrame clone() const {
-        return ImageFrame { src_img.clone(), format, timestamp, capture_timing };
+        return ImageFrame { src_img.clone(), format, timestamp };
     }
     std::vector<uint8_t> serialize(int quality = 55) const {
         std::vector<uint8_t> buffer;

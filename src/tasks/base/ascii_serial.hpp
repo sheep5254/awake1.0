@@ -93,16 +93,7 @@ inline std::string build_send_frame(
 }
 
 // 下位机 -> 视觉：解析单帧四元数。CRC 不符（两种算法都不符）或格式不对返回 nullopt
-struct RecvDiagnostics {
-    bool crc_ok = false;
-    bool has_raw_quaternion = false;
-    double w = 0, x = 0, y = 0, z = 0;
-    double norm = 0;
-};
-
-inline std::optional<Eigen::Quaterniond> parse_recv_frame(
-    const std::vector<uint8_t>& raw, RecvDiagnostics* diagnostics = nullptr) {
-    if (diagnostics) *diagnostics = {};
+inline std::optional<Eigen::Quaterniond> parse_recv_frame(const std::vector<uint8_t>& raw) {
     size_t n = raw.size();
     while (n > 0 && (raw[n - 1] == '\n' || raw[n - 1] == '\r' || raw[n - 1] == ' ')) --n;
     if (n > 0 && raw[n - 1] == '%') --n;  // 末尾 '%' 可省
@@ -126,19 +117,12 @@ inline std::optional<Eigen::Quaterniond> parse_recv_frame(
         return std::nullopt;
     }
 
-    if (diagnostics) diagnostics->crc_ok = true;
     const std::string line(reinterpret_cast<const char*>(raw.data()), cpos);
     double w = 0, x = 0, y = 0, z = 0;
     if (std::sscanf(line.c_str(), "ARQ%lfX%lfY%lfZ%lf", &w, &x, &y, &z) != 4) return std::nullopt;
 
     Eigen::Quaterniond q(w, x, y, z);
     const double norm = q.norm();
-    if (diagnostics) {
-        diagnostics->has_raw_quaternion = true;
-        diagnostics->w = w; diagnostics->x = x;
-        diagnostics->y = y; diagnostics->z = z;
-        diagnostics->norm = norm;
-    }
     if (!std::isfinite(norm) || norm < 1e-6) return std::nullopt;
     q.normalize();
     return q;

@@ -491,22 +491,6 @@ int ArmorTarget::update(
     }
     if (!obs.empty()) {
         target_state.x = esekf->update_multi(obs);
-        // 【地面目标先验：车身 roll/pitch 钳位】实际机器人在地面上，车体系相对世界只有 yaw，
-        // roll/pitch 应≈0。但单块平板观测对这两个角是弱可观的：实测小陀螺一次就能把它从
-        // −4° 一路推到 −30°（单调漂移，q_wpr=1e-7 也压不住，因为是被量测更新推的）。
-        // 而装甲板离车心 r≈0.25m，车体系倾斜 30° 会把"要击打的那块板"的高度带偏
-        // r·sin30°≈0.12m（≈5° 俯仰），表现就是"打着打着枪口越来越低，然后慢慢恢复"。
-        // 这里做物理钳位（±6°），并把钳位后的状态写回 EKF，避免下一拍 predict 又漂回去。
-        {
-            constexpr double MAX_TILT = 6.0 * CV_PI / 180.0;
-            const double rx = target_state.x[idx::C_ROT_X];
-            const double ry = target_state.x[idx::C_ROT_Y];
-            if (std::abs(rx) > MAX_TILT || std::abs(ry) > MAX_TILT) {
-                target_state.x[idx::C_ROT_X] = std::clamp(rx, -MAX_TILT, MAX_TILT);
-                target_state.x[idx::C_ROT_Y] = std::clamp(ry, -MAX_TILT, MAX_TILT);
-                esekf->set_state(target_state.x);
-            }
-        }
         target_state.timestamp = timestamp;
         last_update = timestamp;
         this_id = GLOBAL_ID++;

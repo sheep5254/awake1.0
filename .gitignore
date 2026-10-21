@@ -42,6 +42,3 @@ MvSdkLog/
 # ---- 本地备份/工具缓存（不入库）----
 .backup_*/
 .dsh-code-index/
-
-# Isolated Codex diagnostic build products
-/build-codex-diagnostics/

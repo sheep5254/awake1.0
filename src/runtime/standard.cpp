@@ -58,7 +58,6 @@
 #include "tasks/base/packet_typedef_receive.hpp"
 #include "tasks/base/packet_typedef_send.hpp"
 #include "tasks/base/record.hpp"
-#include "tasks/base/diagnostics.hpp"
 #include "tasks/base/web.hpp"
 #include "utils/buffer.hpp"
 #include "utils/common/image.hpp"
@@ -103,7 +102,7 @@ struct DetectTag {};
 struct FrameTag {};
 
 using CameraIO = IOPair<CameraTag, ImageFrame>;
-using SerialIO = IOPair<SerialTag, SerialReadChunk>;
+using SerialIO = IOPair<SerialTag, std::vector<uint8_t>>;
 using CommonFrameIo = IOPair<FrameTag, CommonFrame>;
 struct Detection {
     std::optional<std::vector<auto_aim::Armors>> armors;
@@ -211,27 +210,6 @@ int main(int argc, char** argv) {
             AWAKENING_INFO(
                 "record enabled: {} (每次启动自瞄都会覆盖这个文件)", record::run_recorder().path()
             );
-        }
-    }
-    {
-        const auto logging = config["frame_log"];
-        const bool enable = logging && logging["diagnostics"]
-            ? logging["diagnostics"].as<bool>() : false;
-        if (record::diagnostics().open(std::string(RECORD_FOLDER_PATH), enable)) {
-            AWAKENING_INFO("diagnostic events: {}", record::diagnostics().path().string());
-            record::diagnostics().write({
-                {"kind", "session"}, {"schema", 1},
-                {"host_clock", "system_clock_unix_ns"},
-                {"duration_clock", "steady_clock_ns"},
-                {"quaternion_order", "wxyz"},
-                {"mcu_sample_timestamp_available", false},
-                {"device_timestamp_clock_calibrated", false},
-                {"command_pitch_convention", "positive_ZYX_rpy_y_degrees"},
-                {"legacy_cam_pitch_convention", "negative_ZYX_rpy_y_degrees"},
-                {"serial_send_to_image_microseconds", config["serial_send_to_image_microseconds"].as<int>()}
-            });
-        } else if (enable) {
-            AWAKENING_WARN("diagnostic events could not be opened; control continues");
         }
     }
     Scheduler s;
@@ -491,22 +469,6 @@ int main(int argc, char** argv) {
         if (f.src_img.empty()) {
             return std::make_tuple(std::optional<CommonFrameIo::second_type>(std::nullopt));
         }
-        if (record::diagnostics().enabled()) {
-            const auto& timing = f.capture_timing;
-            record::diagnostics().write({
-                {"kind", "camera"}, {"frame_id", current_id},
-                {"image_ns", std::chrono::duration_cast<std::chrono::nanoseconds>(f.timestamp.time_since_epoch()).count()},
-                {"pipeline_ns", std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count()},
-                {"sdk_metadata_available", timing.sdk_metadata_available},
-                {"host_buffer_ns", timing.host_buffer_ns},
-                {"host_buffer_steady_ns", timing.host_buffer_steady_ns},
-                {"exposure_us", record::num(timing.exposure_us)},
-                {"sdk_exposure_us", record::num(timing.sdk_exposure_us)},
-                {"hardware_frame_id", timing.hardware_frame_id},
-                {"device_timestamp_ticks", timing.device_timestamp_ticks},
-                {"sdk_host_timestamp_raw", timing.sdk_host_timestamp}
-            });
-        }
         log_ctx.camera_count++;
         camera_frame_count.fetch_add(1, std::memory_order_relaxed);
         CommonFrame frame {
@@ -524,10 +486,6 @@ int main(int argc, char** argv) {
             std::lock_guard<std::mutex> lock(mutex);
             auto now = Clock::now();
 
-            const auto host_received_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                data.host_received_time.time_since_epoch()).count();
-            uint64_t frames_in_chunk = 0;
-            uint64_t rejected_in_chunk = 0;
             if (ascii_recv) {
                 // ASCII 帧（serial.recv_protocol = 1）：ARQ<w>X<x>Y<y>Z<z>C<4位hex>%
                 // 只带四元数，所以二进制包里的时间戳/角速度/车体速度/弹速/弹数/
@@ -539,20 +497,9 @@ int main(int argc, char** argv) {
                 // 的 0x5A 二进制包），而这里拿到的是任意长度的读块 —— 必须自己
                 // 搜 "ARQ" 起点、按 '%'/'\n' 切帧、跨读块拼接。
                 ascii_recv_scanner.feed(data.data(), data.size(), [&](std::vector<uint8_t>&& frame) {
-                    ++frames_in_chunk;
-                    ascii_serial::RecvDiagnostics raw;
-                    auto q_opt = ascii_serial::parse_recv_frame(frame, &raw);
+                    auto q_opt = ascii_serial::parse_recv_frame(frame);
                     if (!q_opt.has_value()) {
                         log_ctx.serial_bad_frame++;
-                        ++rejected_in_chunk;
-                        if (record::diagnostics().enabled()) {
-                            record::diagnostics().write({
-                                {"kind", "imu_rejected"}, {"chunk_seq", data.host_chunk_seq},
-                                {"host_received_ns", host_received_ns}, {"crc_ok", raw.crc_ok},
-                                {"has_raw_quaternion", raw.has_raw_quaternion},
-                                {"raw_norm", record::num(raw.norm)}
-                            });
-                        }
                         return;
                     }
 
@@ -574,12 +521,6 @@ int main(int argc, char** argv) {
                                           packet_time.time_since_epoch()
                         )
                                           .count();
-                        s.host_received_ns = host_received_ns;
-                        s.host_received_steady_ns = data.host_received_steady_ns;
-                        s.host_chunk_seq = data.host_chunk_seq;
-                        s.raw_quaternion_available = raw.has_raw_quaternion;
-                        s.raw_w = raw.w; s.raw_x = raw.x;
-                        s.raw_y = raw.y; s.raw_z = raw.z; s.raw_norm = raw.norm;
                         s.w = q_opt->w();
                         s.x = q_opt->x();
                         s.y = q_opt->y();
@@ -601,18 +542,6 @@ int main(int argc, char** argv) {
                         s.bad = static_cast<uint64_t>(log_ctx.serial_bad_frame);
                         s.protocol = 1;
                         record_imu.set(s);
-                        if (record::diagnostics().enabled()) {
-                            record::diagnostics().write({
-                                {"kind", "imu"}, {"seq", s.seq}, {"parse_rejects", s.bad},
-                                {"chunk_seq", s.host_chunk_seq}, {"index_in_chunk", frames_in_chunk},
-                                {"host_received_ns", s.host_received_ns},
-                                {"host_received_steady_ns", s.host_received_steady_ns},
-                                {"host_processed_ns", s.wall_ns}, {"tf_assigned_ns", s.packet_ns},
-                                {"raw_wxyz", {s.raw_w, s.raw_x, s.raw_y, s.raw_z}},
-                                {"raw_norm", record::num(s.raw_norm)},
-                                {"normalized_wxyz", {s.w, s.x, s.y, s.z}}
-                            });
-                        }
                     }
                     ISO3 gimbal_in_gimbal_odom = ISO3::Identity();
                     gimbal_in_gimbal_odom.linear() = q_opt->toRotationMatrix();
@@ -630,17 +559,6 @@ int main(int argc, char** argv) {
                         j["quat_z"] = Web::val(q_opt->z());
                     });
                 });
-                if (record::diagnostics().enabled()) {
-                    record::diagnostics().write({
-                        {"kind", "serial_chunk"}, {"chunk_seq", data.host_chunk_seq},
-                        {"bytes", data.size()}, {"frames", frames_in_chunk},
-                        {"rejected", rejected_in_chunk},
-                        {"host_received_ns", host_received_ns},
-                        {"host_received_steady_ns", data.host_received_steady_ns},
-                        {"host_processed_ns", std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count()},
-                        {"host_parse_end_ns", std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count()}
-                    });
-                }
                 return;
             }
 
@@ -1136,13 +1054,6 @@ int main(int argc, char** argv) {
                                   )
                                       .count()
                               );
-                        imu["host_received_ns"] = s.host_received_ns;
-                        imu["host_chunk_seq"] = s.host_chunk_seq;
-                        imu["raw_available"] = s.raw_quaternion_available;
-                        if (s.raw_quaternion_available) {
-                            imu["raw_wxyz"] = {s.raw_w, s.raw_x, s.raw_y, s.raw_z};
-                            imu["raw_norm"] = record::num(s.raw_norm);
-                        }
                         imu["w"] = record::num(s.w);
                         imu["x"] = record::num(s.x);
                         imu["y"] = record::num(s.y);
@@ -1271,9 +1182,8 @@ int main(int argc, char** argv) {
         };
         auto shoot_in_gimbal_odom =
             tf->pose_a_in_b(SimpleFrame::SHOOT, SimpleFrame::GIMBAL_ODOM, Clock::now());
-        const auto gimbal_pose_lookup_time = Clock::now();
         auto gimbal_in_gimbal_odom =
-            tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, gimbal_pose_lookup_time);
+            tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
         static ShootControlSend shoot_send;
         if (a_target.check()) {
             very_aimer.set_operator_offset(operator_offset);
@@ -1441,49 +1351,17 @@ int main(int argc, char** argv) {
                 // absolute 模式丢目标时**不发云台角**：发 0/0 会被当成"世界系 yaw=0"，
                 // 云台会甩到正前方；导航侧会锁存上一条指令。
 
-                int64_t gimbal_publish_begin_ns = 0;
-                int64_t gimbal_publish_end_ns = 0;
                 if (send_gimbal) {
                     sensor_msgs::msg::JointState gimbal_msg;
                     gimbal_msg.name = { "gimbal_pitch_joint", "gimbal_yaw_joint" };
                     gimbal_msg.position = { pitch_cmd, yaw_cmd };
-                    gimbal_publish_begin_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count();
                     gimbal_cmd_pub->publish(gimbal_msg);
-                    gimbal_publish_end_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count();
                 }
 
                 // 停火必须显式发 0（导航侧会锁存）
                 example_interfaces::msg::UInt8 shoot_msg;
                 shoot_msg.data = (cmd.appear && cmd.fire_advice) ? 2 : 0; // 2 = 连发
                 shoot_cmd_pub->publish(shoot_msg);
-                if (record::diagnostics().enabled()) {
-                    const auto latest_imu = record_imu.get();
-                    const double raw_pitch_delta = cmd.pitch - cur_pitch_deg;
-                    const double raw_yaw_delta = wrap180(cmd.yaw - cur_yaw_deg);
-                    record::diagnostics().write({
-                        {"kind", "nav_command"},
-                        {"host_published_ns", std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count()},
-                        {"gimbal_publish_begin_ns", gimbal_publish_begin_ns},
-                        {"gimbal_publish_end_ns", gimbal_publish_end_ns},
-                        {"planner_ns", std::chrono::duration_cast<std::chrono::nanoseconds>(cmd.timestamp.time_since_epoch()).count()},
-                        {"pose_lookup_ns", std::chrono::duration_cast<std::chrono::nanoseconds>(gimbal_pose_lookup_time.time_since_epoch()).count()},
-                        {"latest_imu_seq_at_record", latest_imu.seq},
-                        {"mode", nav_gimbal_delta ? "delta" : "absolute"},
-                        {"units", nav_gimbal_delta && nav_gimbal_units_deg ? "deg" : "rad"},
-                        {"appear", cmd.appear}, {"gimbal_published", send_gimbal},
-                        {"pitch", record::num(pitch_cmd)}, {"yaw", record::num(yaw_cmd)},
-                        {"current_pitch_rpy_deg", record::num(cur_pitch_deg)},
-                        {"current_pitch_up_deg", record::num(-cur_pitch_deg)},
-                        {"current_yaw_deg", record::num(cur_yaw_deg)},
-                        {"planner_pitch_deg", record::num(cmd.pitch)},
-                        {"planner_yaw_deg", record::num(cmd.yaw)},
-                        {"raw_pitch_delta_deg", record::num(raw_pitch_delta)},
-                        {"raw_yaw_delta_deg", record::num(raw_yaw_delta)},
-                        {"pitch_limited", cmd.appear && nav_gimbal_delta && std::abs(raw_pitch_delta) > 3.0},
-                        {"yaw_limited", cmd.appear && nav_gimbal_delta && std::abs(raw_yaw_delta) > 3.0},
-                        {"shoot_request", shoot_msg.data}
-                    });
-                }
             }
 
             static TimePoint last_target_pub {};
@@ -1688,7 +1566,7 @@ int main(int argc, char** argv) {
         camera->start<CameraTag>("hik");
     }
     if (serial) {
-        serial->start<SerialTag, SerialReadChunk>("serial");
+        serial->start<SerialTag>("serial");
     }
     if (show_window) {
         show_running.store(true);
@@ -1749,7 +1627,6 @@ int main(int argc, char** argv) {
 #endif
     utils::SignalGuard::spin(std::chrono::milliseconds(1000));
     s.stop();
-    record::diagnostics().close();
     if (show_thread.joinable()) {
         show_running.store(false);
         show_thread.join();
