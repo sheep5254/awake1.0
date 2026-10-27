@@ -96,6 +96,10 @@ bool HikCamera::start_capture() {
         AWAKENING_ERROR("Failed to start camera grabbing!");
         return false;
     }
+    // 刚 StartGrabbing 后立刻取图，海康 SDK 偶尔会连续返回 MV_E_NODATA，
+    // 导致启动阶段白白重启 1~3 次（日志里几乎每次启动都有 33 条 NODATA）。
+    // 这里等 200ms 让流稳定，能显著减少启动期的假失败。
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
     running_ = true;
     return true;
 }
@@ -108,9 +112,20 @@ ImageFrame HikCamera::read() {
     }
 
     Frame frame;
-    int n_ret = MV_CC_GetImageBuffer(camera_handle_, &frame.out_frame, 100);
+    int n_ret = MV_CC_GetImageBuffer(camera_handle_, &frame.out_frame, 400);
     if (n_ret != MV_OK) {
-        AWAKENING_ERROR("MV_CC_GetImageBuffer fail: {}", n_ret);
+        // 取图失败很常见于相机刚启动/偶发丢帧（MV_E_NODATA=-2147483641），
+        // 但原来每次失败都打一条 error，重启一次会刷 11 条。这里限流成 1s 一条。
+        static auto last_log = std::chrono::steady_clock::time_point {};
+        static int fail_in_window = 0;
+        const auto now = std::chrono::steady_clock::now();
+        ++fail_in_window;
+        if (now - last_log > std::chrono::seconds(1)) {
+            AWAKENING_WARN(
+                "MV_CC_GetImageBuffer fail: {}（过去 1s 内 {} 次）", n_ret, fail_in_window);
+            last_log = now;
+            fail_in_window = 0;
+        }
         return img_frame;
     }
 
@@ -134,6 +149,7 @@ void HikCamera::restart() {
         AWAKENING_ERROR("Failed to start grabbing after restart");
         return;
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     AWAKENING_INFO("Camera restarted successfully!");
     return;

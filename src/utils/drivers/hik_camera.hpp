@@ -144,7 +144,7 @@ public:
         if (r == MV_OK) {
             AWAKENING_INFO("hik_camera: {} set to {}", param, c);
         } else {
-            AWAKENING_ERROR("hik_camera: Failed to set {}, status={}", param, r);
+            AWAKENING_WARN("hik_camera: 该相机不支持参数 {}（status={}），已跳过", param, r);
         }
     }
     inline void HikSetIntRange(void* camera_handle, const char* param, int64_t val) {
@@ -160,7 +160,7 @@ public:
         if (r == MV_OK) {
             AWAKENING_INFO("hik_camera: {} set to {}", param, c);
         } else {
-            AWAKENING_ERROR("hik_camera: Failed to set {}, status={}", param, r);
+            AWAKENING_WARN("hik_camera: 该相机不支持参数 {}（status={}），已跳过", param, r);
         }
     }
     inline void HikSetBool(void* camera_handle, const char* param, bool val) {
@@ -168,7 +168,7 @@ public:
         if (r == MV_OK) {
             AWAKENING_INFO("hik_camera: {} set to {}", param, (val ? 1 : 0));
         } else {
-            AWAKENING_ERROR("hik_camera: Failed to set {}, status={}", param, r);
+            AWAKENING_WARN("hik_camera: 该相机不支持参数 {}（status={}），已跳过", param, r);
         }
     }
     inline void HikSetEnumStr(void* camera_handle, const char* param, const std::string& val) {
@@ -176,7 +176,7 @@ public:
         if (r == MV_OK) {
             AWAKENING_INFO("hik_camera: {} set to {}", param, val);
         } else {
-            AWAKENING_ERROR("hik_camera: Failed to set {}, status={}", param, r);
+            AWAKENING_WARN("hik_camera: 该相机不支持参数 {}（status={}），已跳过", param, r);
         }
     }
 
