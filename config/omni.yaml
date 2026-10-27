@@ -344,10 +344,8 @@ camera:
     # 180 fps → 每帧 5.56ms；配合 auto_exposure.exposure_max=3000µs 留出 2.5ms
     # 余量，避免 MV_CC_GetImageBuffer fail (MV_E_NODATA，取流超时)。
     # 检测侧本来就只跑 ~100fps，180 对性能没有影响。
-    # 180 -> 120：实测相机每 ~10s 会 USB 复位重枚举一次（内核日志 usb 4-2: reset /
-    # USB disconnect / new SuperSpeed device），降到 120 把链路负载从 166MB/s 降到 110MB/s，
-    # 能显著降低复位概率；跟踪只需要 ~100fps 就够（6.4rad/s 时每帧 3°）。
-    acquisition_frame_rate: 120
+    # 若相机 USB 复位/掉线变频繁，可降到 120 应急（166MB/s -> 110MB/s）。
+    acquisition_frame_rate: 180
     exposure_time: 2500
     gain: 16.9
     gamma: 0.7 #Bayer用不了
