@@ -29,6 +29,7 @@ struct VeryAimer::Impl {
         double shooting_range_w_large;
         double min_enable_pitch_deg;
         double min_enable_yaw_deg;
+        double fire_actual_tol_deg = 1.5;
 
         void load(const YAML::Node& config) {
             sample_total_time = config["sample_total_time"].as<double>();
@@ -45,6 +46,9 @@ struct VeryAimer::Impl {
             shooting_range_w_large = config["shooting_range_w_large"].as<double>();
             min_enable_pitch_deg = config["min_enable_pitch_deg"].as<double>();
             min_enable_yaw_deg = config["min_enable_yaw_deg"].as<double>();
+            fire_actual_tol_deg = config["fire_actual_tol_deg"]
+                ? config["fire_actual_tol_deg"].as<double>()
+                : 1.5;
         }
     } params_;
     using MPCType = dta_utils::TinyMpcTrajectory;
@@ -685,6 +689,25 @@ struct VeryAimer::Impl {
                 // if (!has_can) {
                 //     cmd.no_shoot();
                 // }
+            }
+        }
+
+        // 【开火前再核一次"云台实际角"】上面的 fire_advice 比较的是 target_traj 与
+        // control_traj —— 两者都在解算内部、只差 ~0.01°，等于恒真；而云台实际角(IMU)可能
+        // 还差好几度。实测开火帧里 31% 的 |cmd.pitch - act| > 2.4°（最大 17.9°），也就是
+        // "云台没跟上就已经开火"。这里要求"云台实际角 ≈ 理想瞄准角"才允许开火：
+        //   fire_actual_tol_deg = 0 关闭（回到旧行为）；建议 1.5（≈ 命中窗口 2.4° 的 2/3）。
+        if (params_.fire_actual_tol_deg > 0.0) {
+            const auto cur_rpy = utils::matrix2rpy<double>(
+                gimbal_in_gimbal_odom.linear(), utils::RPYOrder::ZYX);
+            const double cur_pitch_deg = angles::to_degrees(cur_rpy[1]);
+            const double cur_yaw_deg = angles::to_degrees(cur_rpy[2]);
+            const auto err_deg = [](double a, double b) {
+                return std::abs(angles::shortest_angular_distance_degrees(a, b));
+            };
+            if (err_deg(cmd.target_pitch, cur_pitch_deg) > params_.fire_actual_tol_deg
+                || err_deg(cmd.target_yaw, cur_yaw_deg) > params_.fire_actual_tol_deg) {
+                cmd.no_shoot();
             }
         }
 
