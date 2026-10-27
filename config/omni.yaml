@@ -227,7 +227,7 @@ very_aimer:
   sample_horizon: 200
 
   fire_delay_min: 0.03
-  fire_delay_max: 0.07
+  fire_delay_max: 0.05
   
   # MPC 轨迹的角加速度上限：板子移动/换板时瞄准点在俯仰上会有 ±2~3° 的变化，
   # 原来 40/50 太保守，轨迹跟不上就形成恒定滞后（实测：小陀螺时云台比瞄准点低 ~3°，
@@ -344,7 +344,10 @@ camera:
     # 180 fps → 每帧 5.56ms；配合 auto_exposure.exposure_max=3000µs 留出 2.5ms
     # 余量，避免 MV_CC_GetImageBuffer fail (MV_E_NODATA，取流超时)。
     # 检测侧本来就只跑 ~100fps，180 对性能没有影响。
-    acquisition_frame_rate: 180
+    # 180 -> 120：实测相机每 ~10s 会 USB 复位重枚举一次（内核日志 usb 4-2: reset /
+    # USB disconnect / new SuperSpeed device），降到 120 把链路负载从 166MB/s 降到 110MB/s，
+    # 能显著降低复位概率；跟踪只需要 ~100fps 就够（6.4rad/s 时每帧 3°）。
+    acquisition_frame_rate: 120
     exposure_time: 2500
     gain: 16.9
     gamma: 0.7 #Bayer用不了
