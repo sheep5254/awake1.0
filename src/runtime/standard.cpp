@@ -1360,7 +1360,7 @@ int main(int argc, char** argv) {
 
                 // 停火必须显式发 0（导航侧会锁存）
                 example_interfaces::msg::UInt8 shoot_msg;
-                shoot_msg.data = (cmd.appear && cmd.fire_advice) ? 2 : 0; // 2 = 连发
+                shoot_msg.data = (cmd.appear && cmd.fire_advice) ? 1 : 0; // 1 = 连发
                 shoot_cmd_pub->publish(shoot_msg);
             }
 
