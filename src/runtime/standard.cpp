@@ -220,6 +220,7 @@ int main(int argc, char** argv) {
 #ifdef USE_ROS2
     rcl::RclcppNode rcl_node("awakening");
     rcl::TF rcl_tf(rcl_node);
+    utils::Locked<auto_aim_interfaces::msg::Target> nav_observation;
     // 视觉不再直接串口下发，改为发布话题、由导航统一下发到底层板。
     //   publish_to_nav: true 时发布下面三个话题
     // QoS 必须对：导航侧 cmd_gimbal_joint / cmd_shoot 用默认 reliable 订阅，
@@ -256,6 +257,11 @@ int main(int argc, char** argv) {
             "publish_to_nav: cmd_gimbal_joint / cmd_shoot / tracker/target"
         );
     }
+#endif
+#ifdef USE_ROS2
+    const auto debug_frame = [publish_to_nav](const std::string& frame) {
+        return publish_to_nav ? "awakening_" + frame : frame;
+    };
 #endif
     bool use_daedalus = false;
 #ifdef USE_Daedalus
@@ -838,6 +844,34 @@ int main(int argc, char** argv) {
                 armors.frame_id = std::to_underlying(SimpleFrame::ODOM);
                 auto __armor_target =
                     armor_tracker.track(armors, camera_info, camera_cv_in_odom, armors.frame_id);
+#ifdef USE_ROS2
+                if (publish_to_nav) {
+                    using auto_aim::ArmorClass;
+                    const auto id = __armor_target.target_number;
+                    if (id < ArmorClass::SENTRY || id > ArmorClass::NO5 ||
+                        !__armor_target.check()) {
+                        nav_observation.set(auto_aim_interfaces::msg::Target{});
+                    } else if (__armor_target.last_update == armors.timestamp) {
+                        // Use the transform from this image, before prediction or output freezing.
+                        const Vec3 center =
+                            camera_cv_in_odom.inverse() * __armor_target.get_target_state().pos();
+                        const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            armors.timestamp.time_since_epoch()).count();
+                        auto_aim_interfaces::msg::Target observation;
+                        if (center.allFinite() && center.z() > 0.0 && ns > 0) {
+                            observation.header.frame_id = "front_industrial_camera_optical_frame";
+                            observation.header.stamp = rclcpp::Time(ns, RCL_SYSTEM_TIME);
+                            observation.id = id == ArmorClass::SENTRY
+                                ? "7" : std::to_string(static_cast<int>(id));
+                            observation.armors_num = __armor_target.armor_num();
+                            observation.position.x = center.x();
+                            observation.position.y = center.y();
+                            observation.position.z = center.z();
+                        }
+                        nav_observation.set(observation);
+                    }
+                }
+#endif
                 // 【丢观测时冻结输出】last_update 只在 init/真正 EKF 更新时变；它没变 =
                 // 这一帧没有新的观测。内部状态会按上一次的速度自由积分，实测车心 z 能漂到
                 // -6~+1.6 m（"识别坐标系上下晃"），而瞄准读的就是这个输出。
@@ -1293,7 +1327,7 @@ int main(int argc, char** argv) {
         //                      delta    = 相对当前云台角的增量，丢目标发 0/0（"三零"=丢失）
         //                      absolute = 世界系绝对角(rad)，丢目标不发（由导航锁存）
         //   cmd_shoot        : 0 停火 / >0 开火，与云台同频；停火必须显式发 0
-        //   tracker/target   : 只填 tracking，低频 ~15Hz；放开控制要显式发 false
+        //   tracker/target   : 相机光学帧的车体中心，重复发布保留观测时间
         if (publish_to_nav) {
             // 用 detect_frame_count（只在真跑过推理的帧自增），
             // 不用 camera_frame_count —— 后者会把被背压跳过的帧也算进来。
@@ -1372,6 +1406,9 @@ int main(int argc, char** argv) {
             const bool changed = !has_last_tracking || (cmd.appear != last_tracking);
             if (due || changed) {
                 auto_aim_interfaces::msg::Target target_msg;
+                if (cmd.appear && mode == Mode::AutoAim) {
+                    target_msg = nav_observation.get();
+                }
                 target_msg.tracking = cmd.appear;
                 target_pub->publish(target_msg);
                 last_tracking = cmd.appear;
@@ -1536,7 +1573,7 @@ int main(int argc, char** argv) {
             auto armors = dbg->armors.get();
             rcl::pub_armor_target_marker(
                 rcl_node,
-                SimpleFrame_to_str(__armor_target.get_target_state().frame_id),
+                debug_frame(SimpleFrame_to_str(__armor_target.get_target_state().frame_id)),
                 __armor_target
             );
 #endif
@@ -1544,8 +1581,8 @@ int main(int argc, char** argv) {
 #ifdef USE_ROS2
         if (debug) {
             s.add_rate_source<>("tf_pub", 100.0, [&]() {
-                rcl_tf.pub_robot_tf(*tf, [](SimpleFrame frame) {
-                    return SimpleFrame_to_str(frame);
+                rcl_tf.pub_robot_tf(*tf, [&](SimpleFrame frame) {
+                    return debug_frame(SimpleFrame_to_str(frame));
                 });
             });
         }
