@@ -10,10 +10,10 @@ bullet_speed: 21.0
 #   注意：键名是 frame_log —— 不能用 record，那个键是"录屏(video)"（config 后面
 #   的 record: enable: false），重名会被 YAML 覆盖、把录屏一起打开。
 frame_log:
-  # 【注意】逐帧记录是**在 detect 线程里同步写盘**的（RunRecorder::write：序列化+写+每20帧flush）。
-  # 实测 210KB/s，机器负载高/磁盘忙时会把 detect 线程卡住 → 相机和串口一起饿死 → 画面 0 帧。
-  # 平时关掉；要分析时再临时开。
-  enable: false
+  # 【注意】逐帧记录是**在 detect 线程里同步写盘**的（序列化+写+每20帧flush，实测 210KB/s），
+  # 机器负载高时可能把 detect 线程卡住 → 画面 0 帧。
+  # 现在临时打开做一轮诊断（固定靶5s → 小陀螺20s → 停5s），分析完改回 false。
+  enable: true
 
 serial:
   enable: true
@@ -266,7 +266,7 @@ very_aimer:
   # 整条链路（曝光→推理→串口→云台响应）有百毫秒级延迟，小陀螺时按飞行时间瞄
   # 永远落在板子后面，所以这里额外补一段。0.10 → 总提前量约 0.19s；嫌大就调小，
   # 完全按物理弹道瞄就设回 0.00。
-  prediction_delay: 0.08 ##########################################################################
+  prediction_delay: 0.00 ##########################################################################
   aim_center_more_prediction_time: 0.0
 
   shooting_range_h: 0.12
