@@ -170,6 +170,11 @@ struct ArmorTracker::Impl {
             camera_info,
             camera_cv_in_odom
         );
+        const double dt_prior = std::clamp(
+            std::chrono::duration<double>(armors.timestamp - target.last_update).count(),
+            0.0,
+            0.2
+        );
         const int updated = target.update(
             matched_armors,
             matched_lights,
@@ -177,6 +182,16 @@ struct ArmorTracker::Impl {
             camera_info,
             camera_cv_in_odom
         );
+        // 【车心高度软先验】单板 PnP 的高度估计系统性偏低（实测收敛 -0.045m，实际 -0.20m，
+        // 因为云台装得高），且要 5~10s 才收敛 → 锁定初期瞄准偏低、之后"慢慢往上抬"。
+        // 这里按时间常数把 CZ 往物理先验拉一点（软约束：图像测量强时仍以测量为主）。
+        if (updated > 0 && cfg_.car_z_prior_enable && cfg_.car_z_prior_tau > 1e-3) {
+            namespace idx = auto_aim::armor_point_motion_model::idx;
+            const double alpha = dt_prior / (cfg_.car_z_prior_tau + dt_prior);
+            target.set_target_state([&](auto& s) {
+                s.x[idx::CZ] += alpha * (cfg_.car_z_prior - s.x[idx::CZ]);
+            });
+        }
         return updated > 0;
     }
     void update_fsm(bool found, size_t i, const TimePoint& now) noexcept {

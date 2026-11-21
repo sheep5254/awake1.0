@@ -23,6 +23,11 @@ struct ArmorTrackerCfg {
     // 重新初始化，别一直空推到 lost_time_thres(1.5s)——否则预测框/车坐标系会钉在原地，
     // 表现为"识别到了但画出来的东西飞了"。
     double relock_time_thres = 0.3;
+    // 【车心高度软先验】把 CZ 往 car_z_prior 拉（时间常数 tau），修"锁上先瞄低、慢慢抬高"。
+    // 单板 PnP 的高度估计偏低且要 5~10s 才收敛，而板高物理恒定。
+    bool car_z_prior_enable = false;
+    double car_z_prior = 0.0;
+    double car_z_prior_tau = 2.0;
     double armor_match_gate;
     double armor_match_gate_not_all_init;
     double armor_match_w_center_err;
@@ -53,6 +58,11 @@ struct ArmorTrackerCfg {
             config["detecting_miss_tol"] ? config["detecting_miss_tol"].as<int>() : 3;
         relock_time_thres =
             config["relock_time_thres"] ? config["relock_time_thres"].as<double>() : 0.3;
+        car_z_prior_enable =
+            config["car_z_prior_enable"] ? config["car_z_prior_enable"].as<bool>() : false;
+        car_z_prior = config["car_z_prior"] ? config["car_z_prior"].as<double>() : 0.0;
+        car_z_prior_tau =
+            config["car_z_prior_tau"] ? config["car_z_prior_tau"].as<double>() : 2.0;
         armor_match_gate = config["armor_match_gate"].as<double>();
         armor_match_gate_not_all_init = config["armor_match_gate_not_all_init"].as<double>();
         armor_match_w_center_err = config["armor_match_w_center_err"].as<double>();
