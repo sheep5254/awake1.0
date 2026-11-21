@@ -35,6 +35,10 @@ struct VeryAimer::Impl {
         bool ballistic_h_const_enable = false;
         double ballistic_h_const = 0.0;
         bool ballistic_h_const_log = false;
+        // 【俯仰符号】solve_pitch 返回物理仰角(正=上)，但 rpy2matrix 用的是标准 Ry(pitch)，
+        // 正 pitch 让 +X 朝下 → 直接把 α 填进去会让枪管压低 α。这里取负修正。
+        // -1 = 修正后（默认）；+1 = 旧行为。
+        double ballistic_pitch_sign = -1.0;
         // 瞄准点高度改用"当前可见那块板"的 z（而不是超前预测那块板的 z）
         bool aim_z_from_observed = false;
 
@@ -68,6 +72,9 @@ struct VeryAimer::Impl {
             ballistic_h_const_log = config["ballistic_h_const_log"]
                 ? config["ballistic_h_const_log"].as<bool>()
                 : false;
+            ballistic_pitch_sign = config["ballistic_pitch_sign"]
+                ? config["ballistic_pitch_sign"].as<double>()
+                : -1.0;
         }
     } params_;
     using MPCType = dta_utils::TinyMpcTrajectory;
@@ -233,9 +240,15 @@ struct VeryAimer::Impl {
         }
         const auto [yaw_offset, pitch_offset] = get_yaw_pitch_offset();
         const double desired_control_yaw = std::atan2(p.y(), p.x());
+        // 【俯仰符号修正】离线自检验证：solve_pitch 返回物理仰角 α(正=上)，
+        // 而 rpy2matrix 的标准 Ry(pitch) 使 +X 朝下 → 直接填 α 会让枪管压低 α。
+        // 实测（固定靶 1.2m）: α=+0.764° → 前向轴实际 -0.764°；改用 -α 后为 +0.764° ✓
+        // 这也解释了过去"自旋时 pitch 慢慢往下、落点偏低 3~5cm"（α 变大 → 被压得更低）。
+        const double pitch_for_matrix =
+            params_.ballistic_pitch_sign * (desired_pitch_opt.value() + pitch_offset);
         auto desired_shoot = utils::rpy2matrix(Vec3(
             0.0,
-            desired_pitch_opt.value() + pitch_offset,
+            pitch_for_matrix,
             angles::normalize_angle(desired_control_yaw + yaw_offset)
         ));
         const Mat3 R_gimbal_shoot =
