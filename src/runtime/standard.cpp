@@ -226,7 +226,7 @@ int main(int argc, char** argv) {
         record::diag_logger().open(diag_path, true);
         AWAKENING_INFO("diag log enabled: {} (<=20Hz, 异步)", diag_path);
         record::diag_logger().push(
-            "t_ms,pz,d,alpha_deg,atan_pz_d_deg,cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state,det_u,det_v"
+            "t_ms,pz,d,alpha_deg,atan_pz_d_deg,cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state,det_u,det_v,act_roll,act_fwd_elev"
         );
     }
     Scheduler s;
@@ -1323,7 +1323,7 @@ int main(int argc, char** argv) {
                 std::snprintf(
                     line,
                     sizeof(line),
-                    "%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%d,%d,%s,%.1f,%.1f",
+                    "%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%d,%d,%s,%.1f,%.1f,%.2f,%.2f",
                     std::chrono::duration<double, std::milli>(now_diag.time_since_epoch()).count(),
                     cmd.dbg_pz,
                     cmd.dbg_d,
@@ -1339,7 +1339,12 @@ int main(int argc, char** argv) {
                     cmd.fire_advice ? 1 : 0,
                     state_diag.c_str(),
                     static_cast<double>(diag_det_u.load()),
-                    static_cast<double>(diag_det_v.load())
+                    static_cast<double>(diag_det_v.load()),
+                    angles::to_degrees(cur_rpy_diag[0]),
+                    angles::to_degrees(std::atan2(
+                        gimbal_in_gimbal_odom.linear()(2, 0),
+                        std::hypot(gimbal_in_gimbal_odom.linear()(0, 0), gimbal_in_gimbal_odom.linear()(1, 0))
+                    ))
                 );
                 record::diag_logger().push(line);
             }
