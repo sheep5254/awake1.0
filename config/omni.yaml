@@ -284,9 +284,12 @@ very_aimer:
   #   从日志里找 `ballistic p.z()=...` 那一行，把读到的值填进 ballistic_h_const，
   #   再把 enable 改 true 即可。之后用固定靶标定 base_pitch_offset 吸收残余偏差。
   # 注意：这是“板中心 - 枪口”的高度差，不是车心高度 CZ 的 +0.147。
-  ballistic_h_const_enable: false
-  ballistic_h_const: 0.0
-  ballistic_h_const_log: true
+  # 【实测初值 2026-11-21 20:39】固定靶(0.93m)命中状态下 p.z() 稳定在 +0.004 m
+  # （范围 -0.007~+0.013）→ 取 0.00。注意它不是 CZ(+0.147)，也不是物理 -0.20，
+  # 因为 p 是"装甲板中心 - 枪口"，还含枪口随云台俯仰的位置变化。
+  ballistic_h_const_enable: true
+  ballistic_h_const: 0.00
+  ballistic_h_const_log: false
   # 【瞄准点高度】true = 用"当前可见那块板"的高度，而不是超前预测那块板的模型高度。
   # 4 块板物理等高，但模型里高度不一致（车体倾斜/H 不可观，极差 ~0.1m≈4°），
   # 超前量会把瞄准点换到下一块板 → 瞄准点整体偏低/偏高（实测自旋时低 76px≈4°）。
