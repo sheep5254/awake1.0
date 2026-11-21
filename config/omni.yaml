@@ -97,7 +97,9 @@ record:
 
 tf:
   camera_in_gimbal:
-    t: [0.06,0.00,-0.08]
+    # 相机中心相对云台：前 6cm、无横向、**比枪管中心高 5cm**（实测，2026-11-21）。
+    # 原来写的是 z=-0.08（低 8cm）→ 与实测差 13cm；1.21m 处约 6° 的落点偏差。
+    t: [0.06,0.00,0.05]
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
   shoot_in_gimbal:
     t: [0.2,0.0,0.0]
@@ -232,7 +234,10 @@ auto_aim_fsm:
 very_aimer:
   type: mpc
   base_yaw_offset: -0.5
-  base_pitch_offset: 6.0
+  # 【重标】相机/枪管几何已按实测修正（相机比枪管高 5cm），所以这里的偏置清零，
+  # 只用它补偿"纯机械/弹道"的静态偏差。重标办法：2m 打固定靶，量落点相对板中心
+  # 的竖直偏差 Δh，偏高 Δh → 本值 = -atan(Δh/2m)；再在 1.2m / 4m 各验证一发。
+  base_pitch_offset: 0.0
   # base_yaw_offset: -0.0
   # base_pitch_offset: -0.0
   sample_total_time: 1.0
