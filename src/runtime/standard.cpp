@@ -219,7 +219,7 @@ int main(int argc, char** argv) {
     std::atomic<float> diag_det_u { -1.0f };
     std::atomic<float> diag_det_v { -1.0f };
     std::atomic<double> diag_obs_pixel_elev { 0.0 };  // 观测 LOS(像素射线, 世界系仰角)
-    std::atomic<double> diag_obs_pnp_elev { 0.0 };    // 观测 LOS(PnP 三维点)
+    std::atomic<int> diag_det_num { -1 };             // 被匹配板的号码（ArmorClass）
     std::atomic<double> diag_img_age_ms { 0.0 };      // 图像时刻→解算时刻
     const bool diag_log_enable = config["diag_log"] && config["diag_log"]["enable"]
         ? config["diag_log"]["enable"].as<bool>()
@@ -229,7 +229,7 @@ int main(int argc, char** argv) {
         record::diag_logger().open(diag_path, true);
         AWAKENING_INFO("diag log enabled: {} (<=20Hz, 异步)", diag_path);
         record::diag_logger().push(
-            "t_ms,pz,d,alpha_deg,atan_pz_d_deg,cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state,det_u,det_v,act_roll,act_fwd_elev,dbg_valid,dbg_age_ms,dbg_aim_id,obs_pixel_elev,obs_pnp_elev,img_age_ms"
+            "t_ms,pz,d,alpha_deg,atan_pz_d_deg,cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state,det_u,det_v,act_roll,act_fwd_elev,dbg_valid,dbg_age_ms,dbg_aim_id,obs_pixel_elev,img_age_ms,det_plate_id"
         );
     }
     Scheduler s;
@@ -874,23 +874,13 @@ int main(int argc, char** argv) {
                 armors.frame_id = std::to_underlying(SimpleFrame::ODOM);
                 auto __armor_target =
                     armor_tracker.track(armors, camera_info, camera_cv_in_odom, armors.frame_id);
-                // 诊断用：取面积最大的那块检测板的像素中心（v 上升 = 板在画面里往上跑）
-                if (!armors.armors.empty()) {
-                    auto* best = &armors.armors.front();
-                    float best_area = -1.0f;
-                    for (auto& a: armors.armors) {
-                        const auto bb = a.key_points.bounding_box();
-                        const float area = bb.width * bb.height;
-                        if (area > best_area) {
-                            best_area = area;
-                            best = &a;
-                        }
-                    }
-                    const auto bb = best->key_points.bounding_box();
-                    const float bu = (bb.tl().x + bb.br().x) * 0.5f;
-                    const float bv = (bb.tl().y + bb.br().y) * 0.5f;
+                // 诊断用：取"被跟踪器匹配上"的那块板（绑定板编号），而不是面积最大的检测框
+                if (__armor_target.dbg_match_u >= 0.0f) {
+                    const float bu = __armor_target.dbg_match_u;
+                    const float bv = __armor_target.dbg_match_v;
                     diag_det_u.store(bu);
                     diag_det_v.store(bv);
+                    diag_det_num.store(__armor_target.dbg_match_num);
                     // 观测 LOS：像素中心 + 内参 → 相机系射线 → 曝光时刻相机姿态 → 世界系仰角
                     if (!camera_info.camera_matrix.empty()) {
                         const double fx_k = camera_info.camera_matrix.at<double>(0, 0);
@@ -906,11 +896,6 @@ int main(int argc, char** argv) {
                             ));
                         }
                     }
-                    // 观测 LOS：PnP 三维点相对相机中心
-                    const Vec3 rel = best->pose.translation() - camera_cv_in_odom.translation();
-                    diag_obs_pnp_elev.store(angles::to_degrees(
-                        std::atan2(rel.z(), std::hypot(rel.x(), rel.y()))
-                    ));
                     diag_img_age_ms.store(
                         std::chrono::duration<double, std::milli>(
                             Clock::now() - armors.timestamp
@@ -1353,7 +1338,7 @@ int main(int argc, char** argv) {
                 std::snprintf(
                     line,
                     sizeof(line),
-                    "%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%d,%d,%s,%.1f,%.1f,%.2f,%.2f,%d,%.1f,%d,%.3f,%.3f,%.1f",
+                    "%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%d,%d,%s,%.1f,%.1f,%.2f,%.2f,%d,%.1f,%d,%.3f,%.1f,%d",
                     std::chrono::duration<double, std::milli>(now_diag.time_since_epoch()).count(),
                     cmd.dbg_pz,
                     cmd.dbg_d,
@@ -1379,8 +1364,8 @@ int main(int argc, char** argv) {
                     cmd.dbg_age_ms,
                     cmd.dbg_aim_id,
                     diag_obs_pixel_elev.load(),
-                    diag_obs_pnp_elev.load(),
-                    diag_img_age_ms.load()
+                    diag_img_age_ms.load(),
+                    diag_det_num.load()
                 );
                 record::diag_logger().push(line);
             }

@@ -205,6 +205,10 @@ public:
     bool is_inited = false;
     bool jumped = false;
     int last_match_id = -1;
+    // 诊断：最近一次成功匹配的板（像素中心 + 号码），供 diag.csv 用
+    float dbg_match_u = -1.0f;
+    float dbg_match_v = -1.0f;
+    int dbg_match_num = -1;
     std::optional<std::pair<bool, std::vector<bool>>> outpost_has_all_and_has_set_ids;
     TrackState track_state;
     TimePoint last_update;

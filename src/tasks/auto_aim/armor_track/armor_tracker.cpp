@@ -170,6 +170,14 @@ struct ArmorTracker::Impl {
             camera_info,
             camera_cv_in_odom
         );
+        // 诊断：记录"被匹配上"的那块板（而不是面积最大的检测框）
+        if (!matched_armors.empty()) {
+            auto& a0 = matched_armors.front();  // pair<板索引, Armor>
+            const auto bb0 = a0.second.key_points.bounding_box();
+            target.dbg_match_u = (bb0.tl().x + bb0.br().x) * 0.5f;
+            target.dbg_match_v = (bb0.tl().y + bb0.br().y) * 0.5f;
+            target.dbg_match_num = a0.first;  // 板索引 0..3（换板时这个会变）
+        }
         const double dt_prior = std::clamp(
             std::chrono::duration<double>(armors.timestamp - target.last_update).count(),
             0.0,
