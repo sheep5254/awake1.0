@@ -10,7 +10,10 @@ bullet_speed: 21.0
 #   注意：键名是 frame_log —— 不能用 record，那个键是"录屏(video)"（config 后面
 #   的 record: enable: false），重名会被 YAML 覆盖、把录屏一起打开。
 frame_log:
-  enable: true
+  # 【注意】逐帧记录是**在 detect 线程里同步写盘**的（RunRecorder::write：序列化+写+每20帧flush）。
+  # 实测 210KB/s，机器负载高/磁盘忙时会把 detect 线程卡住 → 相机和串口一起饿死 → 画面 0 帧。
+  # 平时关掉；要分析时再临时开。
+  enable: false
 
 serial:
   enable: true
