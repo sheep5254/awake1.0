@@ -13,7 +13,7 @@ frame_log:
   # 【注意】逐帧记录是**在 detect 线程里同步写盘**的（序列化+写+每20帧flush，实测 210KB/s），
   # 机器负载高时可能把 detect 线程卡住 → 画面 0 帧。
   # 现在临时打开做一轮诊断（固定靶5s → 小陀螺20s → 停5s），分析完改回 false。
-  enable: true
+  enable: false
 
 serial:
   enable: true
@@ -287,7 +287,10 @@ very_aimer:
   # 【实测初值 2026-11-21 20:39】固定靶(0.93m)命中状态下 p.z() 稳定在 +0.004 m
   # （范围 -0.007~+0.013）→ 取 0.00。注意它不是 CZ(+0.147)，也不是物理 -0.20，
   # 因为 p 是"装甲板中心 - 枪口"，还含枪口随云台俯仰的位置变化。
-  ballistic_h_const_enable: true
+  # 【2026-11-21 20:44 实测】改成 true(值 0.00) 后：弹道仰角恒等于"水平"，
+  # 而状态里的板高会漂到 +0.05~+0.2 → 两者不一致 → 瞄准整体偏低约 2~3° →
+  # 目标从画面上沿溜走、gt 锁不住（58 次 init target）。所以先关掉。
+  ballistic_h_const_enable: false
   ballistic_h_const: 0.00
   ballistic_h_const_log: false
   # 【瞄准点高度】true = 用"当前可见那块板"的高度，而不是超前预测那块板的模型高度。
