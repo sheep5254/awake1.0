@@ -225,6 +225,9 @@ public:
         target.is_inited = this->is_inited;
         target.jumped = this->jumped;
         target.last_match_id = this->last_match_id;
+        target.dbg_match_u = this->dbg_match_u;
+        target.dbg_match_v = this->dbg_match_v;
+        target.dbg_match_num = this->dbg_match_num;
         target.outpost_has_all_and_has_set_ids = this->outpost_has_all_and_has_set_ids;
         target.this_id = this->this_id;
         target.update_count = this->update_count;
