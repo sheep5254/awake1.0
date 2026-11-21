@@ -70,6 +70,10 @@ use_sim: false
 #   tracker/target   (auto_aim_interfaces/Target, SensorDataQoS) 只填 tracking
 # 需编译时开 ROS2（USE_ROS2）且 source 了含 auto_aim_interfaces 的工作空间。
 publish_to_nav: true
+# 【单帧也发方向】哨兵无操作手、云台扫视找人时用：只看到 1~3 帧（DETECTING）也把
+# 当前帧解算的方向发给下位机（只瞄不开火）。timeout 内没有新观测就回到 0/0。
+publish_when_detecting: true
+single_frame_publish_timeout: 0.3
 
 # cmd_gimbal_joint 里 position[0]=pitch / position[1]=yaw 的语义：
 #   delta    : **增量**（相对"当前云台角"），由下位机自己叠加到当前角度上，
@@ -90,7 +94,7 @@ record:
 
 tf:
   camera_in_gimbal:
-    t: [0.14,0.05,0.0]
+    t: [0.06,0.00,-0.08]
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
   shoot_in_gimbal:
     t: [0.2,0.0,0.0]
@@ -108,16 +112,16 @@ auto_exposure:
   enable: true
   # 25 ≈ 10% 平均亮度偏暗，号码分类容易读不准（no1/no2/outpost/none 乱跳）；
   # 调亮一档再看日志里的 nocand 是否下降。
-  target_brightness: 45.0
+  target_brightness: 145.0  # 目标平均灰度（0~255），45 属于很暗
   tolerance: 3.0
-  step_gain: 16.0
+  step_gain: 6.0
   decay_step: 1.0
   exposure_min: 1200.0
   # 250 fps → 每帧只有 4ms，曝光要留出读出/传输余量，否则会出现
   # MV_CC_GetImageBuffer fail (0x80000007 = MV_E_NODATA，取流超时)。
   # 想要更长曝光就把 acquisition_frame_rate 降到 150~200（检测本来只跑 ~100fps，
   # 降帧不影响性能），那时这里可以放回 3500。
-  exposure_max: 2000.0
+  exposure_max: 3000.0
   control_interval_ms: 300
 
 
@@ -165,7 +169,7 @@ armor_detector:
 armor_tracker:
   lost_time_thres: 1.5
   lost_time_thres_outpost: 2.0
-  tracking_thres: 5
+  tracking_thres: 1
   # DETECTING 期间允许连续几次漏检再判丢失（0 = 旧行为，一帧不中就丢）
   detecting_miss_tol: 3
   # 检到板子但连续这么久更新不上（匹配全被门限拒/预测偏了），就把该检测当新目标重新
@@ -242,7 +246,7 @@ very_aimer:
   # 整条链路（曝光→推理→串口→云台响应）有百毫秒级延迟，小陀螺时按飞行时间瞄
   # 永远落在板子后面，所以这里额外补一段。0.10 → 总提前量约 0.19s；嫌大就调小，
   # 完全按物理弹道瞄就设回 0.00。
-  prediction_delay: 0.00  ##########################################################################
+  prediction_delay: 0.08 ##########################################################################
   aim_center_more_prediction_time: 0.0
 
   shooting_range_h: 0.12
@@ -309,8 +313,8 @@ rune_tracker:
   r_sigma_pix_by_hand_length_ratio_net: 0.2
 
 rune_aimer:
-  base_yaw_offset: 1.0
-  base_pitch_offset: -0.5
+  base_yaw_offset: 0.0
+  base_pitch_offset: 0.0
   sample_total_time: 0.5
   sample_horizon: 10
   prediction_delay: -0.00
@@ -346,8 +350,8 @@ camera:
     # 检测侧本来就只跑 ~100fps，180 对性能没有影响。
     # 若相机 USB 复位/掉线变频繁，可降到 120 应急（166MB/s -> 110MB/s）。
     acquisition_frame_rate: 180
-    exposure_time: 2500
-    gain: 16.9
+    exposure_time: 2000
+    gain: 16.9 #16.9
     gamma: 0.7 #Bayer用不了
     trigger_mode: Off
     trigger_source: ""

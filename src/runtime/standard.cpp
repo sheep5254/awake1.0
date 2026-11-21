@@ -227,6 +227,16 @@ int main(int argc, char** argv) {
     //             tracker/target 用 SensorDataQoS 订阅（best-effort）。
     const bool publish_to_nav =
         config["publish_to_nav"] ? config["publish_to_nav"].as<bool>() : false;
+    // 【单帧也发方向】哨兵没有操作手、靠云台扫视找人：只看到 1~3 帧时如果不出指令，
+    // 目标一旦离开视野就再也回不来（而且固定"必须 6 帧才进 TRACKING"会让扫视永远锁不上）。
+    // 开启后：在 DETECTING（已初始化、还没进 TRACKING）阶段也发布瞄准方向，
+    //   但**不允许开火**；超过 single_frame_publish_timeout 没有新观测就回到 0/0。
+    const bool publish_when_detecting = config["publish_when_detecting"]
+        ? config["publish_when_detecting"].as<bool>()
+        : false;
+    const double single_frame_publish_timeout = config["single_frame_publish_timeout"]
+        ? config["single_frame_publish_timeout"].as<double>()
+        : 0.3;
     // cmd_gimbal_joint 的语义：
     //   nav_gimbal_mode: delta（增量，下位机自己叠加）/ absolute（世界系绝对角）
     //   nav_gimbal_units: delta 模式下的单位 rad / deg（absolute 恒为 rad）
@@ -1219,7 +1229,14 @@ int main(int argc, char** argv) {
         auto gimbal_in_gimbal_odom =
             tf->pose_a_in_b(SimpleFrame::GIMBAL, SimpleFrame::GIMBAL_ODOM, Clock::now());
         static ShootControlSend shoot_send;
-        if (a_target.check()) {
+        const bool tracking_ok = a_target.check();
+        // 单帧/少帧：已初始化(DETECTING)但还没进 TRACKING，且最近 single_frame_publish_timeout
+        // 内还有观测 → 允许只发方向（开火在后面被强制关掉）。
+        const bool single_frame_ok = publish_when_detecting && !tracking_ok
+            && a_target.need_focus()
+            && std::chrono::duration<double>(Clock::now() - a_target.last_update).count()
+                < single_frame_publish_timeout;
+        if (tracking_ok || single_frame_ok) {
             very_aimer.set_operator_offset(operator_offset);
             cmd = very_aimer.very_aim(
                 a_target,
@@ -1228,6 +1245,10 @@ int main(int argc, char** argv) {
                 shoot_in_gimbal_odom,
                 gimbal_in_gimbal_odom
             );
+            if (!tracking_ok) {
+                // 还没进 TRACKING（1~几帧）：只给方向，不开火，避免用单帧估计打弹。
+                cmd.no_shoot();
+            }
 
         } else if (r_target.check()) {
             rune_aimer.set_operator_offset(operator_offset);
