@@ -179,11 +179,14 @@ armor_tracker:
   detecting_miss_tol: 3
   # 检到板子但连续这么久更新不上（匹配全被门限拒/预测偏了），就把该检测当新目标重新
   # 初始化，不等 lost_time_thres(1.5s)。否则预测框/车坐标系会钉在原地不动。
-  relock_time_thres: 0.3
+  # 0.3 -> 0.5：0.3s 内更新不上就推倒重来太急，容易进入"重锁→状态更差→更难匹配"循环。
+  relock_time_thres: 0.5
   # 【车心高度软先验】板中心相对云台俯仰轴的高度（m）。云台装得高，板比云台低约 20cm。
   # 单板 PnP 估的高度偏低（实测收敛 -0.045，实际 -0.20）且要 5~10s 才收敛 → 表现为
   # "锁上先瞄低、然后慢慢往上抬"。这条软约束把 CZ 往先验拉（tau 秒时间常数）。
-  car_z_prior_enable: true
+  # 实测无效（CZ 仍停在 -0.039，没被拉到 -0.20），而且每帧改状态 z 会让预测偏、
+  # 更容易被 match gate 拒 → 先关掉观察。
+  car_z_prior_enable: false
   car_z_prior: -0.20
   car_z_prior_tau: 2.0
   # 车心位置过程噪声：单板观测时若给太大（30），车心会被那块板的快速运动拖着走，
@@ -199,7 +202,9 @@ armor_tracker:
   q_wpr: 0.0000001
   q_outpost_dz: 0.0000001
   enable_lights_measure: true
-  armor_match_gate: 300.0
+  # 300 -> 450：实测近距离自旋时'匹配代价 304.5'刚好被 300 拒掉 → 观测全丢 →
+  # 触发重锁循环（那轮 26 次 init target）。放宽一点先看 init 次数是否下降。
+  armor_match_gate: 450.0
   armor_match_gate_not_all_init: 1000.0
   armor_match_w_center_err: 5.0
   armor_match_w_angle_err: 10.0
