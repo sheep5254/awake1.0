@@ -220,6 +220,8 @@ int main(int argc, char** argv) {
     std::atomic<float> diag_det_v { -1.0f };
     std::atomic<double> diag_obs_pixel_elev { 0.0 };  // 观测 LOS(像素射线, 世界系仰角)
     std::atomic<int> diag_det_num { -1 };             // 被匹配板的号码（ArmorClass）
+    std::atomic<float> diag_pred_u { -1.0f };         // 该板模型位置投影到图像的像素
+    std::atomic<float> diag_pred_v { -1.0f };
     std::atomic<double> diag_img_age_ms { 0.0 };      // 图像时刻→解算时刻
     const bool diag_log_enable = config["diag_log"] && config["diag_log"]["enable"]
         ? config["diag_log"]["enable"].as<bool>()
@@ -229,7 +231,7 @@ int main(int argc, char** argv) {
         record::diag_logger().open(diag_path, true);
         AWAKENING_INFO("diag log enabled: {} (<=20Hz, 异步)", diag_path);
         record::diag_logger().push(
-            "t_ms,pz,d,alpha_deg,atan_pz_d_deg,cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state,det_u,det_v,act_roll,act_fwd_elev,dbg_valid,dbg_age_ms,dbg_aim_id,obs_pixel_elev,img_age_ms,det_plate_id"
+            "t_ms,pz,d,alpha_deg,atan_pz_d_deg,cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state,det_u,det_v,act_roll,act_fwd_elev,dbg_valid,dbg_age_ms,dbg_aim_id,obs_pixel_elev,img_age_ms,det_plate_id,pred_u,pred_v,ref_id,ref_z,z0,z1,z2,z3,H,car_roll,car_pitch"
         );
     }
     Scheduler s;
@@ -901,6 +903,31 @@ int main(int argc, char** argv) {
                             Clock::now() - armors.timestamp
                         ).count()
                     );
+                    // 模型侧的同一块板：把它的模型位置投影回图像，与上面的检测像素比较
+                    if (__armor_target.is_inited && __armor_target.dbg_match_num >= 0
+                        && !camera_info.camera_matrix.empty())
+                    {
+                        const auto poses_m = __armor_target.get_target_state().get_armors_pose(
+                            __armor_target.target_number
+                        );
+                        const int id_m = __armor_target.dbg_match_num;
+                        if (id_m < static_cast<int>(poses_m.size())) {
+                            const Vec3 pc = camera_cv_in_odom.inverse()
+                                * poses_m[id_m].translation();
+                            if (pc.z() > 1e-3) {
+                                const double fx_k = camera_info.camera_matrix.at<double>(0, 0);
+                                const double fy_k = camera_info.camera_matrix.at<double>(1, 1);
+                                const double cx_k = camera_info.camera_matrix.at<double>(0, 2);
+                                const double cy_k = camera_info.camera_matrix.at<double>(1, 2);
+                                diag_pred_u.store(
+                                    static_cast<float>(fx_k * pc.x() / pc.z() + cx_k)
+                                );
+                                diag_pred_v.store(
+                                    static_cast<float>(fy_k * pc.y() / pc.z() + cy_k)
+                                );
+                            }
+                        }
+                    }
                 }
 #ifdef USE_ROS2
                 if (publish_to_nav) {
@@ -1365,7 +1392,18 @@ int main(int argc, char** argv) {
                     cmd.dbg_aim_id,
                     diag_obs_pixel_elev.load(),
                     diag_img_age_ms.load(),
-                    diag_det_num.load()
+                    diag_det_num.load(),
+                    static_cast<double>(diag_pred_u.load()),
+                    static_cast<double>(diag_pred_v.load()),
+                    cmd.dbg_ref_id,
+                    cmd.dbg_ref_z,
+                    cmd.dbg_z[0],
+                    cmd.dbg_z[1],
+                    cmd.dbg_z[2],
+                    cmd.dbg_z[3],
+                    cmd.dbg_h,
+                    cmd.dbg_car_roll,
+                    cmd.dbg_car_pitch
                 );
                 record::diag_logger().push(line);
             }

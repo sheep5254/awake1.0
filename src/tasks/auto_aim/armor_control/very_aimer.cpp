@@ -451,7 +451,17 @@ struct VeryAimer::Impl {
                     }
                 }
                 obs_plate_z_ = poses_now[best].translation().z();
+                dbg_ref_id_ = best;
+                dbg_ref_z_ = *obs_plate_z_;
             }
+            // 4 块模型板的高度 + H + 车体 roll/pitch（诊断用）
+            for (int i = 0; i < 4 && i < static_cast<int>(poses_now.size()); ++i) {
+                dbg_z_[i] = poses_now[i].translation().z();
+            }
+            const auto& xs = st_now.x;
+            dbg_h_ = xs[armor_point_motion_model::idx::P2];
+            dbg_roll_ = angles::to_degrees(xs[armor_point_motion_model::idx::C_ROT_X]);
+            dbg_pitch_ = angles::to_degrees(xs[armor_point_motion_model::idx::C_ROT_Y]);
         }
         auto make_even = [](int x) { return x % 2 == 0 ? x : x + 1; };
         const int horizon = make_even(params_.sample_horizon);
@@ -516,6 +526,12 @@ struct VeryAimer::Impl {
             cmd.dbg_d = dbg_d_;
             cmd.dbg_alpha_deg = dbg_alpha_deg_;
             cmd.dbg_aim_id = cp0.valid ? cp0.aim_id : dbg_id_;
+            cmd.dbg_ref_id = dbg_ref_id_;
+            cmd.dbg_ref_z = dbg_ref_z_;
+            for (int i = 0; i < 4; ++i) cmd.dbg_z[i] = dbg_z_[i];
+            cmd.dbg_h = dbg_h_;
+            cmd.dbg_car_roll = dbg_roll_;
+            cmd.dbg_car_pitch = dbg_pitch_;
             cmd.dbg_valid = 1;
             cmd.dbg_age_ms = 0.0;
             dbg_id_ = cmd.dbg_aim_id;
@@ -838,6 +854,12 @@ struct VeryAimer::Impl {
     mutable double dbg_alpha_deg_ = 0.0;
     mutable int dbg_id_ = -1;
     mutable TimePoint dbg_tp_ {};
+    mutable int dbg_ref_id_ = -1;
+    mutable double dbg_ref_z_ = 0.0;
+    mutable double dbg_z_[4] = {0, 0, 0, 0};
+    mutable double dbg_h_ = 0.0;
+    mutable double dbg_roll_ = 0.0;
+    mutable double dbg_pitch_ = 0.0;
     MPCType::Ptr mpc_traj_;
 };
 VeryAimer::VeryAimer(const YAML::Node& config) {

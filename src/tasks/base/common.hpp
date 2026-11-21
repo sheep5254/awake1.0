@@ -114,6 +114,13 @@ struct GimbalCmd {
     double obs_pixel_elev = 0;  // 观测 LOS：检测框中心 + 内参 + 曝光时刻相机姿态 → 世界系仰角
     double obs_pnp_elev = 0;    // 观测 LOS：PnP 三维点相对相机中心的世界系仰角
     double img_age_ms = 0;      // 图像时刻 → 当前解算时刻 的间隔
+    // 【诊断】参考板与 4 块板高度：定位"换板导致 LOS 跳变"发生在哪一步
+    int dbg_ref_id = -1;        // aim_z_from_observed 选中的参考板索引
+    double dbg_ref_z = 0;       // 该参考板的 z（就是覆盖到瞄准点上的值）
+    double dbg_z[4] = {0, 0, 0, 0};  // 当前状态下 4 块模型板的 z
+    double dbg_h = 0;           // 状态里的 H（奇数板高度差）
+    double dbg_car_roll = 0;    // 车体 roll（度，来自 C_ROT_X）
+    double dbg_car_pitch = 0;   // 车体 pitch（度，来自 C_ROT_Y）
     inline bool is_valid() const noexcept {
         auto bad = [](double x) { return std::isnan(x) || std::isinf(x); };
 
