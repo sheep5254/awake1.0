@@ -215,6 +215,9 @@ int main(int argc, char** argv) {
     // 【诊断】最终控制点的弹道对比日志：异步写盘 + 上限 20Hz，不影响主流程。
     // 列：t_ms,pz,d,alpha_deg,atan(pz,d)_deg,cmd_pitch,target_pitch,act_pitch,
     //     cmd_yaw,vyaw,cz,appear,fire,state
+    // 供诊断日志用：最新一帧检测到的装甲板像素中心（由 track 分支写入）
+    std::atomic<float> diag_det_u { -1.0f };
+    std::atomic<float> diag_det_v { -1.0f };
     const bool diag_log_enable = config["diag_log"] && config["diag_log"]["enable"]
         ? config["diag_log"]["enable"].as<bool>()
         : false;
@@ -223,7 +226,7 @@ int main(int argc, char** argv) {
         record::diag_logger().open(diag_path, true);
         AWAKENING_INFO("diag log enabled: {} (<=20Hz, 异步)", diag_path);
         record::diag_logger().push(
-            "t_ms,pz,d,alpha_deg,atan_pz_d_deg,cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state"
+            "t_ms,pz,d,alpha_deg,atan_pz_d_deg,cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state,det_u,det_v"
         );
     }
     Scheduler s;
@@ -868,6 +871,22 @@ int main(int argc, char** argv) {
                 armors.frame_id = std::to_underlying(SimpleFrame::ODOM);
                 auto __armor_target =
                     armor_tracker.track(armors, camera_info, camera_cv_in_odom, armors.frame_id);
+                // 诊断用：取面积最大的那块检测板的像素中心（v 上升 = 板在画面里往上跑）
+                if (!armors.armors.empty()) {
+                    auto* best = &armors.armors.front();
+                    float best_area = -1.0f;
+                    for (auto& a: armors.armors) {
+                        const auto bb = a.key_points.bounding_box();
+                        const float area = bb.width * bb.height;
+                        if (area > best_area) {
+                            best_area = area;
+                            best = &a;
+                        }
+                    }
+                    const auto bb = best->key_points.bounding_box();
+                    diag_det_u.store((bb.tl().x + bb.br().x) * 0.5f);
+                    diag_det_v.store((bb.tl().y + bb.br().y) * 0.5f);
+                }
 #ifdef USE_ROS2
                 if (publish_to_nav) {
                     using auto_aim::ArmorClass;
@@ -1304,7 +1323,7 @@ int main(int argc, char** argv) {
                 std::snprintf(
                     line,
                     sizeof(line),
-                    "%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%d,%d,%s",
+                    "%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%d,%d,%s,%.1f,%.1f",
                     std::chrono::duration<double, std::milli>(now_diag.time_since_epoch()).count(),
                     cmd.dbg_pz,
                     cmd.dbg_d,
@@ -1318,7 +1337,9 @@ int main(int argc, char** argv) {
                     cz_diag,
                     cmd.appear ? 1 : 0,
                     cmd.fire_advice ? 1 : 0,
-                    state_diag.c_str()
+                    state_diag.c_str(),
+                    static_cast<double>(diag_det_u.load()),
+                    static_cast<double>(diag_det_v.load())
                 );
                 record::diag_logger().push(line);
             }
