@@ -30,6 +30,8 @@ struct VeryAimer::Impl {
         double min_enable_pitch_deg;
         double min_enable_yaw_deg;
         double fire_actual_tol_deg = 1.5;
+        // 瞄准点高度改用"当前可见那块板"的 z（而不是超前预测那块板的 z）
+        bool aim_z_from_observed = false;
 
         void load(const YAML::Node& config) {
             sample_total_time = config["sample_total_time"].as<double>();
@@ -49,6 +51,9 @@ struct VeryAimer::Impl {
             fire_actual_tol_deg = config["fire_actual_tol_deg"]
                 ? config["fire_actual_tol_deg"].as<double>()
                 : 1.5;
+            aim_z_from_observed = config["aim_z_from_observed"]
+                ? config["aim_z_from_observed"].as<bool>()
+                : false;
         }
     } params_;
     using MPCType = dta_utils::TinyMpcTrajectory;
@@ -218,6 +223,10 @@ struct VeryAimer::Impl {
         const auto& target_state = target.get_target_state();
         const int selected_armor = select_armor(target, fsm);
         auto armors_pose = target_state.get_armors_pose(target.target_number);
+        if (params_.aim_z_from_observed && obs_plate_z_ && selected_armor >= 0
+            && selected_armor < static_cast<int>(armors_pose.size())) {
+            armors_pose[selected_armor].translation().z() = *obs_plate_z_;
+        }
         if (fsm == AutoAimFsm::AIM_WHOLE_CAR_CENTER) { //瞄准中间把目标推回原来板子的位置
             auto p = target_state.pos() - shoot_in_gimbal_odom.translation();
             double center_xy_dis = std::hypot(p.x(), p.y());
@@ -366,6 +375,29 @@ struct VeryAimer::Impl {
         target.set_target_state([&](armor_point_motion_model::State& state) {
             state.predict(now, target.target_number);
         });
+        // 【瞄准点高度用"当前可见那块板"】4 块装甲板物理等高，但模型里它们的高度
+        // 并不一致（来自不可观的车体倾斜/H，实测极差 ~0.1m ≈ 4°）。超前量会把瞄准点
+        // 换到"下一块板"，于是瞄准点高度跟着换 → 枪口偏低/偏高。这里记下"现在正对相机
+        // 那块板"的高度，供 select_and_get_control_point 覆盖预测结果。
+        obs_plate_z_.reset();
+        if (params_.aim_z_from_observed) {
+            const auto& st_now = target.get_target_state();
+            const auto poses_now = st_now.get_armors_pose(target.target_number);
+            if (!poses_now.empty()) {
+                const double cy = std::atan2(st_now.pos().y(), st_now.pos().x());
+                int best = 0;
+                double best_v = std::numeric_limits<double>::infinity();
+                for (int i = 0; i < static_cast<int>(poses_now.size()); ++i) {
+                    const auto rpy = utils::matrix2rpy<double>(poses_now[i].linear());
+                    const double v = std::abs(angles::normalize_angle(rpy[2] - cy));
+                    if (v < best_v) {
+                        best_v = v;
+                        best = i;
+                    }
+                }
+                obs_plate_z_ = poses_now[best].translation().z();
+            }
+        }
         auto make_even = [](int x) { return x % 2 == 0 ? x : x + 1; };
         const int horizon = make_even(params_.sample_horizon);
         const double dt = params_.sample_total_time / horizon;
@@ -726,6 +758,8 @@ struct VeryAimer::Impl {
     double base_yaw_offset_rad_;
     double base_pitch_offset_rad_;
     std::pair<double, double> operator_offset_ = std::make_pair(0, 0);
+    // 当前(未超前)状态下、正对相机那块板的高度；每次 very_aim 刷新一次
+    mutable std::optional<double> obs_plate_z_;
     MPCType::Ptr mpc_traj_;
 };
 VeryAimer::VeryAimer(const YAML::Node& config) {
