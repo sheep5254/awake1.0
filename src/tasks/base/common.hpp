@@ -104,6 +104,10 @@ struct GimbalCmd {
     bool appear = false;
     AimPoint aim_point;
     int select_id = 0;
+    // 【诊断】当前时刻控制点的弹道输入/输出（由 get_control_point 在 cp0 那次调用时填）
+    double dbg_pz = 0;
+    double dbg_d = 0;
+    double dbg_alpha_deg = 0;
     inline bool is_valid() const noexcept {
         auto bad = [](double x) { return std::isnan(x) || std::isinf(x); };
 

@@ -214,6 +214,11 @@ struct VeryAimer::Impl {
             }
         }
         auto desired_pitch_opt = ballistic_trajectory_->solve_pitch(ballistic_p, bullet_speed);
+        if (desired_pitch_opt) {
+            dbg_pz_ = p.z();
+            dbg_d_ = std::hypot(p.x(), p.y());
+            dbg_alpha_deg_ = angles::to_degrees(*desired_pitch_opt);
+        }
         if (!desired_pitch_opt) {
             cp.valid = false;
             // 限流（最多 1 条/秒）：状态被带偏的那几帧会连续触发，原来每拍一条把日志刷爆。
@@ -507,6 +512,9 @@ struct VeryAimer::Impl {
                 shoot_in_gimbal_odom,
                 gimbal_in_gimbal_odom
             );
+            cmd.dbg_pz = dbg_pz_;
+            cmd.dbg_d = dbg_d_;
+            cmd.dbg_alpha_deg = dbg_alpha_deg_;
             if (!cp0.valid) {
                 return cmd;
             }
@@ -810,6 +818,10 @@ struct VeryAimer::Impl {
     std::pair<double, double> operator_offset_ = std::make_pair(0, 0);
     // 当前(未超前)状态下、正对相机那块板的高度；每次 very_aim 刷新一次
     mutable std::optional<double> obs_plate_z_;
+    // 【诊断】最近一次 get_control_point 的弹道输入/输出（cp0 调用后立即取走）
+    mutable double dbg_pz_ = 0.0;
+    mutable double dbg_d_ = 0.0;
+    mutable double dbg_alpha_deg_ = 0.0;
     MPCType::Ptr mpc_traj_;
 };
 VeryAimer::VeryAimer(const YAML::Node& config) {

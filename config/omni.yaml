@@ -9,6 +9,11 @@ bullet_speed: 21.0
 #   图像时刻云台姿态(IMU)、最近一次云台指令(含 age_ms)。
 #   注意：键名是 frame_log —— 不能用 record，那个键是"录屏(video)"（config 后面
 #   的 record: enable: false），重名会被 YAML 覆盖、把录屏一起打开。
+diag_log:
+  # 最终控制点的弹道对比日志（record/auto_aim/diag.csv），异步写盘、<=20Hz：
+  # t_ms,pz,d,alpha_deg,atan(pz,d),cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state
+  enable: true
+
 frame_log:
   # 【注意】逐帧记录是**在 detect 线程里同步写盘**的（序列化+写+每20帧flush，实测 210KB/s），
   # 机器负载高时可能把 detect 线程卡住 → 画面 0 帧。

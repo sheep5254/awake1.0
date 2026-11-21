@@ -212,6 +212,20 @@ int main(int argc, char** argv) {
             );
         }
     }
+    // 【诊断】最终控制点的弹道对比日志：异步写盘 + 上限 20Hz，不影响主流程。
+    // 列：t_ms,pz,d,alpha_deg,atan(pz,d)_deg,cmd_pitch,target_pitch,act_pitch,
+    //     cmd_yaw,vyaw,cz,appear,fire,state
+    const bool diag_log_enable = config["diag_log"] && config["diag_log"]["enable"]
+        ? config["diag_log"]["enable"].as<bool>()
+        : false;
+    if (diag_log_enable) {
+        const auto diag_path = std::string(RECORD_FOLDER_PATH) + "/diag.csv";
+        record::diag_logger().open(diag_path, true);
+        AWAKENING_INFO("diag log enabled: {} (<=20Hz, 异步)", diag_path);
+        record::diag_logger().push(
+            "t_ms,pz,d,alpha_deg,atan_pz_d_deg,cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state"
+        );
+    }
     Scheduler s;
     std::atomic<Mode> mode = str_to_Mode(config["mode"].as<std::string>());
     std::atomic<EnemyColor> enemy_color =
@@ -1261,6 +1275,52 @@ int main(int argc, char** argv) {
                 shoot_send.shoot_count++;
             } else {
                 cmd.fire_advice = false;
+            }
+        }
+
+        // 【诊断】把"最终控制点"的弹道输入/输出与指令一起记下来（<=20Hz，异步）
+        if (record::diag_logger().enabled() && cmd.appear) {
+            static TimePoint last_diag {};
+            const auto now_diag = Clock::now();
+            if (last_diag.time_since_epoch().count() == 0
+                || now_diag - last_diag >= std::chrono::milliseconds(50))
+            {
+                last_diag = now_diag;
+                const auto cur_rpy_diag = utils::matrix2rpy<double>(
+                    gimbal_in_gimbal_odom.linear(), utils::RPYOrder::ZYX
+                );
+                double vyaw_diag = 0.0;
+                double cz_diag = 0.0;
+                std::string state_diag = "na";
+                if (a_target.is_inited) {
+                    const auto& sd = a_target.get_target_state();
+                    vyaw_diag = angles::to_degrees(sd.vyaw());
+                    cz_diag = sd.pos().z();
+                    state_diag = auto_aim::ArmorTarget::TrackState::string_by_state(
+                        a_target.track_state.tracker_state
+                    );
+                }
+                char line[512];
+                std::snprintf(
+                    line,
+                    sizeof(line),
+                    "%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%d,%d,%s",
+                    std::chrono::duration<double, std::milli>(now_diag.time_since_epoch()).count(),
+                    cmd.dbg_pz,
+                    cmd.dbg_d,
+                    cmd.dbg_alpha_deg,
+                    angles::to_degrees(std::atan2(cmd.dbg_pz, std::max(1e-6, cmd.dbg_d))),
+                    cmd.pitch,
+                    cmd.target_pitch,
+                    angles::to_degrees(cur_rpy_diag[1]),
+                    cmd.yaw,
+                    vyaw_diag,
+                    cz_diag,
+                    cmd.appear ? 1 : 0,
+                    cmd.fire_advice ? 1 : 0,
+                    state_diag.c_str()
+                );
+                record::diag_logger().push(line);
             }
         }
 

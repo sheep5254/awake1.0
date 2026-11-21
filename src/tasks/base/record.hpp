@@ -9,7 +9,11 @@
 //     预测装甲板（odom 位置 + 投影像素）、图像时刻的云台姿态（IMU）、
 //     以及最近一次解算出的云台指令（含与指令的时间差 age_ms）。
 #include <nlohmann/json.hpp>
+#include <atomic>
 #include <cmath>
+#include <condition_variable>
+#include <deque>
+#include <thread>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -75,6 +79,104 @@ namespace awakening::record {
         int flush_every_ = 20;
         int lines_ = 0;
     };
+
+    // 异步诊断记录器：内存队列 + 后台线程写盘；调用方负责降采样（建议 10~20 Hz）。
+    // 与 RunRecorder 的区别：**绝不在调用线程里做磁盘 I/O**，队列满时直接丢，
+    // 避免"同步写盘把 detect 线程卡住 → 相机/串口一起饿死"的老问题。
+    class DiagLogger {
+    public:
+        void open(const std::string& path, bool enable) {
+            std::lock_guard<std::mutex> lk(mutex_);
+            enable_ = enable;
+            enabled_.store(enable, std::memory_order_relaxed);
+            if (!enable_) {
+                return;
+            }
+            std::error_code ec;
+            const auto parent = std::filesystem::path(path).parent_path();
+            if (!parent.empty()) {
+                std::filesystem::create_directories(parent, ec);
+            }
+            ofs_.open(path, std::ios::out | std::ios::trunc);
+            if (!ofs_.is_open()) {
+                enable_ = false;
+                enabled_.store(false, std::memory_order_relaxed);
+                return;
+            }
+            run_ = true;
+            th_ = std::thread([this] { loop(); });
+        }
+
+        [[nodiscard]] bool enabled() const noexcept {
+            return enabled_.load(std::memory_order_relaxed);
+        }
+
+        void push(std::string line) {
+            std::lock_guard<std::mutex> lk(mutex_);
+            if (!enable_) {
+                return;
+            }
+            if (q_.size() >= kMaxQ) {
+                ++dropped_;
+                return;
+            }
+            q_.push_back(std::move(line));
+            cv_.notify_one();
+        }
+
+        void close() {
+            enabled_.store(false, std::memory_order_relaxed);
+            {
+                std::lock_guard<std::mutex> lk(mutex_);
+                run_ = false;
+                cv_.notify_all();
+            }
+            if (th_.joinable()) {
+                th_.join();
+            }
+            std::lock_guard<std::mutex> lk(mutex_);
+            if (ofs_.is_open()) {
+                ofs_.flush();
+                ofs_.close();
+            }
+        }
+
+    private:
+        void loop() {
+            while (true) {
+                std::string line;
+                {
+                    std::unique_lock<std::mutex> lk(mutex_);
+                    cv_.wait_for(lk, std::chrono::milliseconds(100), [this] {
+                        return !run_ || !q_.empty();
+                    });
+                    if (q_.empty()) {
+                        if (!run_) return;
+                        continue;
+                    }
+                    line = std::move(q_.front());
+                    q_.pop_front();
+                }
+                ofs_ << line << '\n';   // 锁外写，生产者不停顿
+            }
+        }
+
+        static constexpr size_t kMaxQ = 4096;
+        mutable std::mutex mutex_;
+        std::condition_variable cv_;
+        std::deque<std::string> q_;
+        std::ofstream ofs_;
+        std::thread th_;
+        bool enable_ = false;
+        bool run_ = false;
+        std::atomic<bool> enabled_ { false };
+        size_t dropped_ = 0;
+    };
+
+    inline DiagLogger& diag_logger() {
+        static DiagLogger d;
+        return d;
+    }
 
     inline RunRecorder& run_recorder() {
         static RunRecorder r;
