@@ -30,6 +30,11 @@ struct VeryAimer::Impl {
         double min_enable_pitch_deg;
         double min_enable_yaw_deg;
         double fire_actual_tol_deg = 1.5;
+        // 【弹道高度常数】只给弹道解算用的"板中心相对枪口的高度差"(m)。
+        // 不影响画图/匹配/瞄准点记录（那些仍用原始 p）。
+        bool ballistic_h_const_enable = false;
+        double ballistic_h_const = 0.0;
+        bool ballistic_h_const_log = false;
         // 瞄准点高度改用"当前可见那块板"的 z（而不是超前预测那块板的 z）
         bool aim_z_from_observed = false;
 
@@ -53,6 +58,15 @@ struct VeryAimer::Impl {
                 : 1.5;
             aim_z_from_observed = config["aim_z_from_observed"]
                 ? config["aim_z_from_observed"].as<bool>()
+                : false;
+            ballistic_h_const_enable = config["ballistic_h_const_enable"]
+                ? config["ballistic_h_const_enable"].as<bool>()
+                : false;
+            ballistic_h_const = config["ballistic_h_const"]
+                ? config["ballistic_h_const"].as<double>()
+                : 0.0;
+            ballistic_h_const_log = config["ballistic_h_const_log"]
+                ? config["ballistic_h_const_log"].as<bool>()
                 : false;
         }
     } params_;
@@ -169,7 +183,30 @@ struct VeryAimer::Impl {
     ) const noexcept {
         dta_utils::ControlPoint cp;
         auto p = armor_pose.translation() - shoot_in_gimbal_odom.translation();
-        auto desired_pitch_opt = ballistic_trajectory_->solve_pitch(p, bullet_speed);
+        // 【弹道高度常数】瞄准点的 z 有两个用途：
+        //   ① 画图/匹配/瞄准点记录 —— 必须和图像观测一致（所以绝不能钉状态里的 CZ）；
+        //   ② 弹道解算 —— 它只要"板中心相对枪口高多少"，这个物理上是常数。
+        // 这里只替换 ②：原始 p 继续用于 yaw / cp.aim_point / 其它几何用途，
+        // 另建 ballistic_p 只改 z 后交给 solve_pitch。这样预测框不会飞、
+        // 弹道仰角也不再随 CZ 漂；剩余固定偏差由 base_pitch_offset 一次标定吸收。
+        Vec3 ballistic_p = p;
+        if (params_.ballistic_h_const_enable) {
+            ballistic_p.z() = params_.ballistic_h_const;
+        }
+        if (params_.ballistic_h_const_log) {
+            static TimePoint last_log_tp {};
+            const auto now_log = Clock::now();
+            if (last_log_tp.time_since_epoch().count() == 0
+                || now_log - last_log_tp >= std::chrono::seconds(1))
+            {
+                last_log_tp = now_log;
+                AWAKENING_INFO(
+                    "ballistic p.z()={:+.3f} m | p=[{:+.2f},{:+.2f},{:+.2f}] 恒定值={:+.3f} 启用={}",
+                    p.z(), p.x(), p.y(), p.z(), params_.ballistic_h_const,
+                    params_.ballistic_h_const_enable ? 1 : 0);
+            }
+        }
+        auto desired_pitch_opt = ballistic_trajectory_->solve_pitch(ballistic_p, bullet_speed);
         if (!desired_pitch_opt) {
             cp.valid = false;
             // 限流（最多 1 条/秒）：状态被带偏的那几帧会连续触发，原来每拍一条把日志刷爆。
