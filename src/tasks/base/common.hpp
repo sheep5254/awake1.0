@@ -108,6 +108,12 @@ struct GimbalCmd {
     double dbg_pz = 0;
     double dbg_d = 0;
     double dbg_alpha_deg = 0;
+    int dbg_valid = 0;      // 1 = 本拍重建了轨迹（诊断量是本拍算的）；0 = 复用，量来自上次重建
+    double dbg_age_ms = 0;  // 复用轨迹时诊断量的年龄（ms）
+    int dbg_aim_id = -1;    // 选中的装甲板编号
+    double obs_pixel_elev = 0;  // 观测 LOS：检测框中心 + 内参 + 曝光时刻相机姿态 → 世界系仰角
+    double obs_pnp_elev = 0;    // 观测 LOS：PnP 三维点相对相机中心的世界系仰角
+    double img_age_ms = 0;      // 图像时刻 → 当前解算时刻 的间隔
     inline bool is_valid() const noexcept {
         auto bad = [](double x) { return std::isnan(x) || std::isinf(x); };
 

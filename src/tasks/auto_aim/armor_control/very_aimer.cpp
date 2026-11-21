@@ -515,6 +515,11 @@ struct VeryAimer::Impl {
             cmd.dbg_pz = dbg_pz_;
             cmd.dbg_d = dbg_d_;
             cmd.dbg_alpha_deg = dbg_alpha_deg_;
+            cmd.dbg_aim_id = cp0.valid ? cp0.aim_id : dbg_id_;
+            cmd.dbg_valid = 1;
+            cmd.dbg_age_ms = 0.0;
+            dbg_id_ = cmd.dbg_aim_id;
+            dbg_tp_ = now;
             if (!cp0.valid) {
                 return cmd;
             }
@@ -698,6 +703,15 @@ struct VeryAimer::Impl {
         cmd.target_pitch = angles::to_degrees(target_pitch);
         cmd.fly_time = last_fly_time_;
         cmd.appear = true;
+        // 复用轨迹（本拍没重建）：诊断量沿用上次重建时的值，并标注年龄，避免统计混入零值
+        if (cmd.dbg_valid == 0) {
+            cmd.dbg_pz = dbg_pz_;
+            cmd.dbg_d = dbg_d_;
+            cmd.dbg_alpha_deg = dbg_alpha_deg_;
+            cmd.dbg_aim_id = dbg_id_;
+            cmd.dbg_age_ms =
+                std::chrono::duration<double, std::milli>(now - dbg_tp_).count();
+        }
         cmd.aim_point = aim_traj.state_at(time_in_traj);
         cmd.aim_point.frame_id = target.get_target_state().frame_id;
         cmd.select_id = last_select_;
@@ -822,6 +836,8 @@ struct VeryAimer::Impl {
     mutable double dbg_pz_ = 0.0;
     mutable double dbg_d_ = 0.0;
     mutable double dbg_alpha_deg_ = 0.0;
+    mutable int dbg_id_ = -1;
+    mutable TimePoint dbg_tp_ {};
     MPCType::Ptr mpc_traj_;
 };
 VeryAimer::VeryAimer(const YAML::Node& config) {

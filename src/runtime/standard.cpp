@@ -218,6 +218,9 @@ int main(int argc, char** argv) {
     // 供诊断日志用：最新一帧检测到的装甲板像素中心（由 track 分支写入）
     std::atomic<float> diag_det_u { -1.0f };
     std::atomic<float> diag_det_v { -1.0f };
+    std::atomic<double> diag_obs_pixel_elev { 0.0 };  // 观测 LOS(像素射线, 世界系仰角)
+    std::atomic<double> diag_obs_pnp_elev { 0.0 };    // 观测 LOS(PnP 三维点)
+    std::atomic<double> diag_img_age_ms { 0.0 };      // 图像时刻→解算时刻
     const bool diag_log_enable = config["diag_log"] && config["diag_log"]["enable"]
         ? config["diag_log"]["enable"].as<bool>()
         : false;
@@ -226,7 +229,7 @@ int main(int argc, char** argv) {
         record::diag_logger().open(diag_path, true);
         AWAKENING_INFO("diag log enabled: {} (<=20Hz, 异步)", diag_path);
         record::diag_logger().push(
-            "t_ms,pz,d,alpha_deg,atan_pz_d_deg,cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state,det_u,det_v,act_roll,act_fwd_elev"
+            "t_ms,pz,d,alpha_deg,atan_pz_d_deg,cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state,det_u,det_v,act_roll,act_fwd_elev,dbg_valid,dbg_age_ms,dbg_aim_id,obs_pixel_elev,obs_pnp_elev,img_age_ms"
         );
     }
     Scheduler s;
@@ -884,8 +887,35 @@ int main(int argc, char** argv) {
                         }
                     }
                     const auto bb = best->key_points.bounding_box();
-                    diag_det_u.store((bb.tl().x + bb.br().x) * 0.5f);
-                    diag_det_v.store((bb.tl().y + bb.br().y) * 0.5f);
+                    const float bu = (bb.tl().x + bb.br().x) * 0.5f;
+                    const float bv = (bb.tl().y + bb.br().y) * 0.5f;
+                    diag_det_u.store(bu);
+                    diag_det_v.store(bv);
+                    // 观测 LOS：像素中心 + 内参 → 相机系射线 → 曝光时刻相机姿态 → 世界系仰角
+                    if (!camera_info.camera_matrix.empty()) {
+                        const double fx_k = camera_info.camera_matrix.at<double>(0, 0);
+                        const double fy_k = camera_info.camera_matrix.at<double>(1, 1);
+                        const double cx_k = camera_info.camera_matrix.at<double>(0, 2);
+                        const double cy_k = camera_info.camera_matrix.at<double>(1, 2);
+                        if (fx_k > 1e-6 && fy_k > 1e-6) {
+                            Vec3 ray((bu - cx_k) / fx_k, (bv - cy_k) / fy_k, 1.0);
+                            ray.normalize();
+                            const Vec3 dir_w = camera_cv_in_odom.linear() * ray;
+                            diag_obs_pixel_elev.store(angles::to_degrees(
+                                std::atan2(dir_w.z(), std::hypot(dir_w.x(), dir_w.y()))
+                            ));
+                        }
+                    }
+                    // 观测 LOS：PnP 三维点相对相机中心
+                    const Vec3 rel = best->pose.translation() - camera_cv_in_odom.translation();
+                    diag_obs_pnp_elev.store(angles::to_degrees(
+                        std::atan2(rel.z(), std::hypot(rel.x(), rel.y()))
+                    ));
+                    diag_img_age_ms.store(
+                        std::chrono::duration<double, std::milli>(
+                            Clock::now() - armors.timestamp
+                        ).count()
+                    );
                 }
 #ifdef USE_ROS2
                 if (publish_to_nav) {
@@ -1323,7 +1353,7 @@ int main(int argc, char** argv) {
                 std::snprintf(
                     line,
                     sizeof(line),
-                    "%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%d,%d,%s,%.1f,%.1f,%.2f,%.2f",
+                    "%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%d,%d,%s,%.1f,%.1f,%.2f,%.2f,%d,%.1f,%d,%.3f,%.3f,%.1f",
                     std::chrono::duration<double, std::milli>(now_diag.time_since_epoch()).count(),
                     cmd.dbg_pz,
                     cmd.dbg_d,
@@ -1344,7 +1374,13 @@ int main(int argc, char** argv) {
                     angles::to_degrees(std::atan2(
                         gimbal_in_gimbal_odom.linear()(2, 0),
                         std::hypot(gimbal_in_gimbal_odom.linear()(0, 0), gimbal_in_gimbal_odom.linear()(1, 0))
-                    ))
+                    )),
+                    cmd.dbg_valid,
+                    cmd.dbg_age_ms,
+                    cmd.dbg_aim_id,
+                    diag_obs_pixel_elev.load(),
+                    diag_obs_pnp_elev.load(),
+                    diag_img_age_ms.load()
                 );
                 record::diag_logger().push(line);
             }
