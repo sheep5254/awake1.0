@@ -39,13 +39,7 @@ using UVLVecZ = Eigen::Matrix<double, UVLZ_N, 1>;
 using YPDVecZ = Eigen::Matrix<double, YPDZ_N, 1>;
 constexpr int DIFFZ_N = 1;
 using DiffVecZ = Eigen::Matrix<double, DIFFZ_N, 1>;
-// 【车体倾斜】true = 车体系用完整 SO3(roll/pitch/yaw)；false = 只用 yaw。
-// 实测（2026-11-23，云台固定+目标自旋，diag.csv）：四块板模型高度里
-//   z0−z2(板1 vs 板3) 散布 p10 −6.0cm / p90 +3.0cm  ← 物理上应对称等高，是倾斜污染
-//   H_eff=(2,4组)−(1,3组) = −5mm，与状态里的 H 一致  ← 真实高度差，保留
-// 倾斜在单板观测下不可观 → 漂到 −3~−8° → 把对称的两块转出 ±6cm 假高度差，
-// 自旋换板时瞄准高度跟着跳（pitch 慢慢下沉/上抬）。置 false 只去掉倾斜，H 机制不受影响。
-constexpr bool USE_WROT = false;
+constexpr bool USE_WROT = true;
 template<typename T>
 inline T normalize_angle(T a) {
     const T two_pi = T(2.0 * M_PI);
