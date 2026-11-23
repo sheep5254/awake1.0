@@ -37,7 +37,8 @@ struct VeryAimer::Impl {
         bool ballistic_h_const_log = false;
         // 【俯仰符号】solve_pitch 返回物理仰角(正=上)，但 rpy2matrix 用的是标准 Ry(pitch)，
         // 正 pitch 让 +X 朝下 → 直接把 α 填进去会让枪管压低 α。这里取负修正。
-        // -1 = 修正后（默认）；+1 = 旧行为。
+        // 实测（2026-11-21）：-1 会让固定靶 pitch 一路往下跑并发散 → 不能用；
+        // 实际生效值是配置里的 ballistic_pitch_sign: +1.0（代码默认 -1 仅在配置缺键时生效）。
         double ballistic_pitch_sign = -1.0;
         // 瞄准点高度改用"当前可见那块板"的 z（而不是超前预测那块板的 z）
         bool aim_z_from_observed = false;
@@ -439,15 +440,23 @@ struct VeryAimer::Impl {
             const auto& st_now = target.get_target_state();
             const auto poses_now = st_now.get_armors_pose(target.target_number);
             if (!poses_now.empty()) {
-                const double cy = std::atan2(st_now.pos().y(), st_now.pos().x());
-                int best = 0;
-                double best_v = std::numeric_limits<double>::infinity();
-                for (int i = 0; i < static_cast<int>(poses_now.size()); ++i) {
-                    const auto rpy = utils::matrix2rpy<double>(poses_now[i].linear());
-                    const double v = std::abs(angles::normalize_angle(rpy[2] - cy));
-                    if (v < best_v) {
-                        best_v = v;
-                        best = i;
+                int best = -1;
+                // 优先用"本帧真正匹配到的那块板"的高度（GPT 指出：原来只按模型朝向挑，
+                // 没有和 det_plate_id 绑定，自旋换板时参考板可能与实际观测的板不是同一块）。
+                if (target.dbg_match_num >= 0
+                    && target.dbg_match_num < static_cast<int>(poses_now.size())) {
+                    best = target.dbg_match_num;
+                } else {
+                    const double cy = std::atan2(st_now.pos().y(), st_now.pos().x());
+                    double best_v = std::numeric_limits<double>::infinity();
+                    best = 0;
+                    for (int i = 0; i < static_cast<int>(poses_now.size()); ++i) {
+                        const auto rpy = utils::matrix2rpy<double>(poses_now[i].linear());
+                        const double v = std::abs(angles::normalize_angle(rpy[2] - cy));
+                        if (v < best_v) {
+                            best_v = v;
+                            best = i;
+                        }
                     }
                 }
                 obs_plate_z_ = poses_now[best].translation().z();

@@ -231,7 +231,7 @@ int main(int argc, char** argv) {
         record::diag_logger().open(diag_path, true);
         AWAKENING_INFO("diag log enabled: {} (<=20Hz, 异步)", diag_path);
         record::diag_logger().push(
-            "t_ms,pz,d,alpha_deg,atan_pz_d_deg,cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state,det_u,det_v,act_roll,act_fwd_elev,dbg_valid,dbg_age_ms,dbg_aim_id,obs_pixel_elev,img_age_ms,det_plate_id,pred_u,pred_v,ref_id,ref_z,z0,z1,z2,z3,H,car_roll,car_pitch"
+            "t_ms,pz,d,alpha_deg,atan_pz_d_deg,cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state,det_u,det_v,act_roll,act_fwd_elev,dbg_valid,dbg_age_ms,dbg_aim_id,obs_pixel_elev,img_age_ms,det_plate_id,pred_u,pred_v,ref_id,ref_z,z0,z1,z2,z3,H,car_roll,car_pitch,d_pitch_sent,d_pitch_pub"
         );
     }
     Scheduler s;
@@ -1361,11 +1361,17 @@ int main(int argc, char** argv) {
                         a_target.track_state.tracker_state
                     );
                 }
+                // 【发布增量】镜像增量发布公式，记录真正会发出去的那个数
+                constexpr double kMaxStepDeg = 3.0;
+                const double d_sent_deg = std::clamp(
+                    cmd.pitch - angles::to_degrees(cur_rpy_diag[1]), -kMaxStepDeg, kMaxStepDeg);
+                const double d_pub =
+                    nav_gimbal_units_deg ? d_sent_deg : angles::from_degrees(d_sent_deg);
                 char line[512];
                 std::snprintf(
                     line,
                     sizeof(line),
-                    "%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%d,%d,%s,%.1f,%.1f,%.2f,%.2f,%d,%.1f,%d,%.3f,%.1f,%d,%.1f,%.1f,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.3f,%.2f",
+                    "%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%d,%d,%s,%.1f,%.1f,%.2f,%.2f,%d,%.1f,%d,%.3f,%.1f,%d,%.1f,%.1f,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.3f,%.2f,%.3f,%.5f",
                     std::chrono::duration<double, std::milli>(now_diag.time_since_epoch()).count(),
                     cmd.dbg_pz,
                     cmd.dbg_d,
@@ -1403,7 +1409,9 @@ int main(int argc, char** argv) {
                     cmd.dbg_z[3],
                     cmd.dbg_h,
                     cmd.dbg_car_roll,
-                    cmd.dbg_car_pitch
+                    cmd.dbg_car_pitch,
+                    d_sent_deg,
+                    d_pub
                 );
                 record::diag_logger().push(line);
             }
