@@ -1365,7 +1365,7 @@ int main(int argc, char** argv) {
                 std::snprintf(
                     line,
                     sizeof(line),
-                    "%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%d,%d,%s,%.1f,%.1f,%.2f,%.2f,%d,%.1f,%d,%.3f,%.1f,%d",
+                    "%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%d,%d,%s,%.1f,%.1f,%.2f,%.2f,%d,%.1f,%d,%.3f,%.1f,%d,%.1f,%.1f,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.3f,%.2f",
                     std::chrono::duration<double, std::milli>(now_diag.time_since_epoch()).count(),
                     cmd.dbg_pz,
                     cmd.dbg_d,
