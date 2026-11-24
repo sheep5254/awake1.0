@@ -469,8 +469,20 @@ struct VeryAimer::Impl {
             }
             const auto& xs = st_now.x;
             dbg_h_ = xs[armor_point_motion_model::idx::P2];
-            dbg_roll_ = angles::to_degrees(xs[armor_point_motion_model::idx::C_ROT_X]);
-            dbg_pitch_ = angles::to_degrees(xs[armor_point_motion_model::idx::C_ROT_Y]);
+            // 【注意】原来这里记的是旋转向量分量 C_ROT_X/C_ROT_Y，它不是 roll/pitch（会误导，
+            // 实测读出来 40°+ 其实只是旋转向量分量）。改成真欧拉角（ZYX 分解）：
+            //   car_roll/car_pitch = 车体相对 odom 的真实横滚/俯仰
+            // 这个量才是"倾斜×旋转导致板高起伏"机制里的 tilt。
+            const Vec3 car_rotvec(
+                xs[armor_point_motion_model::idx::C_ROT_X],
+                xs[armor_point_motion_model::idx::C_ROT_Y],
+                xs[armor_point_motion_model::idx::C_ROT_Z]
+            );
+            const auto car_rpy = utils::matrix2rpy<double>(
+                utils::so3_exp<double>(car_rotvec), utils::RPYOrder::ZYX
+            );
+            dbg_roll_ = angles::to_degrees(car_rpy[0]);
+            dbg_pitch_ = angles::to_degrees(car_rpy[1]);
         }
         auto make_even = [](int x) { return x % 2 == 0 ? x : x + 1; };
         const int horizon = make_even(params_.sample_horizon);
