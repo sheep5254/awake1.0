@@ -182,7 +182,7 @@ armor_detector:
       # 模型路径（onnx）
       model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
       # 推理设备：CPU / GPU
-      device_name: "GPU"
+      device_name: "CPU"
       # 性能提示：THROUGHPUT（吞吐）/ LATENCY（延迟）
       perf_mode: "THROUGHPUT"
       # priority: "HIGH"   # OpenVINO 2025 CPU 插件不支持 MODEL_PRIORITY
@@ -449,7 +449,7 @@ rune_detector:
       # 模型路径（cb_rune.onnx）
       model_path: ${ROOT_DIR}/model/cb_rune.onnx
       # 推理设备：CPU / GPU
-      device_name: "GPU"
+      device_name: "CPU"
       # 性能提示：THROUGHPUT / LATENCY
       perf_mode: "THROUGHPUT"
       # priority: "HIGH"   # OpenVINO 2025 CPU 插件不支持 MODEL_PRIORITY
