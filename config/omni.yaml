@@ -31,7 +31,7 @@ serial:
   # 视觉下位机（USB 物理口 3-9）。用 by-path 而不是 ttyUSB1 —— 两个 CH340
   # 都没有序列号，插拔顺序一变 ttyUSB0/1 就会互换。
   # 若装了 udev 规则（见 README/对话记录里的 99-robot-serial.rules），可改成 /dev/vision_mcu。
-  device_name: /dev/ttyACM0
+  device_name: /dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0
   # 只收下位机的 IMU（云台四元数），**不**直接串口下发指令：
   # 指令统一走 ROS/导航，避免和导航抢云台。要恢复"视觉直接闭环"改成 true。
   send_enable: false
@@ -151,7 +151,7 @@ auto_exposure:
   enable: true
   # 25 ≈ 10% 平均亮度偏暗，号码分类容易读不准（no1/no2/outpost/none 乱跳）；
   # 调亮一档再看日志里的 nocand 是否下降。
-  target_brightness: 25.0  # 目标平均灰度（0~255），45 属于很暗
+  target_brightness: 145.0  # 目标平均灰度（0~255），45 属于很暗
   # 目标灰度的允许误差（±，越小越敏感）
   tolerance: 3.0
   # 每次调节的粗调增益（越大越快、越容易振荡）
@@ -250,7 +250,7 @@ armor_tracker:
   # 前哨站专用的丢失时间 s
   lost_time_thres_outpost: 2.0
   # 连续成功更新多少次才进入 TRACKING
-  tracking_thres: 10
+  tracking_thres: 1
   # DETECTING 期间允许连续几次漏检再判丢失（0 = 旧行为，一帧不中就丢）
   detecting_miss_tol: 3
   # 检到板子但连续这么久更新不上（匹配全被门限拒/预测偏了），就把该检测当新目标重新
