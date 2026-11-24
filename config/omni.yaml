@@ -1,5 +1,8 @@
+# 任务模式：auto_aim=打装甲板 / auto_buff=打能量机关（重启生效）
 mode: auto_aim
+# 敌方颜色：red / blue（影响颜色分类与选板）
 enemy_color: red
+# 弹速 m/s，用于弹道下坠补偿；换弹/改枪后必须重测
 bullet_speed: 21.0
 
 # 逐帧诊断记录（纯写文件，不影响任何处理逻辑）
@@ -14,13 +17,16 @@ diag_log:
   # t_ms,pz,d,alpha_deg,atan(pz,d),cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state
   enable: true
 
+# 逐帧 JSONL 记录（detect 线程里同步写盘，负载高会卡检测，默认关）
 frame_log:
   # 【注意】逐帧记录是**在 detect 线程里同步写盘**的（序列化+写+每20帧flush，实测 210KB/s），
   # 机器负载高时可能把 detect 线程卡住 → 画面 0 帧。
   # 现在临时打开做一轮诊断（固定靶5s → 小陀螺20s → 停5s），分析完改回 false。
   enable: false
 
+# 视觉下位机串口：只收 IMU（云台四元数），指令走 ROS/nav
 serial:
+  # 是否打开串口线程
   enable: true
   # 视觉下位机（USB 物理口 3-9）。用 by-path 而不是 ttyUSB1 —— 两个 CH340
   # 都没有序列号，插拔顺序一变 ttyUSB0/1 就会互换。
@@ -29,8 +35,11 @@ serial:
   # 只收下位机的 IMU（云台四元数），**不**直接串口下发指令：
   # 指令统一走 ROS/导航，避免和导航抢云台。要恢复"视觉直接闭环"改成 true。
   send_enable: false
+  # 波特率（必须与下位机固件一致）
   baud_rate: 115200
+  # 数据位（8）
   char_size: 8
+  # 单次读缓冲字节数
   read_buf_size: 4096
 
   # ---- 串口协议版本切换（发送 / 接收 各一个，默认都为 1）----
@@ -69,7 +78,9 @@ serial:
   #   modbus         = 初值 0xFFFF、反射多项式 0xA001
   #                    —— 早期文档/实现用的，若固件按 Modbus 校验再切回这个
   crc_mode: mcrf4xx
+# 图像时间戳相对收包时刻的固定补偿（µs，负=往前提）
 serial_send_to_image_microseconds: -2500
+# 仿真模式：用仿真数据源替代相机（实车 false）
 use_sim: false
 
 # 视觉不再直接串口下发给底层板，改为发布话题、由导航统一下发：
@@ -81,6 +92,7 @@ publish_to_nav: true
 # 【单帧也发方向】哨兵无操作手、云台扫视找人时用：只看到 1~3 帧（DETECTING）也把
 # 当前帧解算的方向发给下位机（只瞄不开火）。timeout 内没有新观测就回到 0/0。
 publish_when_detecting: true
+# 单帧（DETECTING 阶段）解算结果的有效期 s，超时不再发方向
 single_frame_publish_timeout: 0.3
 
 # cmd_gimbal_joint 里 position[0]=pitch / position[1]=yaw 的语义：
@@ -97,95 +109,155 @@ nav_gimbal_mode: delta
 # delta 模式下的单位：rad | deg（absolute 模式恒为 rad）
 nav_gimbal_units: rad
 
+# 录屏（avi）开关，输出到 record/ 目录
 record:
+ # 录屏是否启用（很占磁盘/带宽，比赛别开）
  enable: false
 
+# 外参：相机/枪口相对云台的位姿（x前/y左/z上，单位 m）
 tf:
+  # 相机光心相对云台俯仰轴的位姿（实测：比枪管中心高 5cm）
   camera_in_gimbal:
     # 相机中心相对云台：前 6cm、无横向、**比枪管中心高 5cm**（实测，2026-11-21）。
     # 原来写的是 z=-0.08（低 8cm）→ 与实测差 13cm；1.21m 处约 6° 的落点偏差。
-    t: [0.06,0.00,0.05]
+    t: [0.00,0.00,0.05]
+    # 相机相对云台的旋转（3x3 行优先；单位阵=光轴与枪管平行）
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
+  # 枪口相对云台俯仰轴的位姿
   shoot_in_gimbal:
+    # 枪口位置：[x 前, y 左, z 上]，单位 m
     t: [0.2,0.0,0.0]
+    # 枪口相对云台的旋转（3x3 行优先）
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
+# 轮式里程计 EKF（底盘速度 + 视觉位置融合，给导航用）
 wheel_odometry:
+  # 位移过程噪声方差 [x,y,z]（越大越信任视觉）
   q_xyz: [10.0,10.0,1.0]
+  # 底盘速度测量噪声方差 [x,y,z]
   r_vxyz: [0.05,0.05,0.05]
 
+# 取弹点（回补给弹，不影响自瞄）
 bullet_pick_up:
+  # 取弹点的弹道参数
   ballistic_trajectory:
+    # 重力加速度 m/s²
     gravity: 9.8
+    # 空气阻力系数 k（弹道模型里的 e^{kd} 项）
     resistance: 0.001
   
+# 自动曝光：按画面平均灰度调节曝光时间
 auto_exposure:
+  # 自动曝光开关（关掉就用 exposure_time 固定值）
   enable: true
   # 25 ≈ 10% 平均亮度偏暗，号码分类容易读不准（no1/no2/outpost/none 乱跳）；
   # 调亮一档再看日志里的 nocand 是否下降。
   target_brightness: 145.0  # 目标平均灰度（0~255），45 属于很暗
+  # 目标灰度的允许误差（±，越小越敏感）
   tolerance: 3.0
+  # 每次调节的粗调增益（越大越快、越容易振荡）
   step_gain: 6.0
+  # 反向回调时的最小步长（防来回振荡）
   decay_step: 1.0
+  # 曝光时间下限 µs
   exposure_min: 1200.0
   # 250 fps → 每帧只有 4ms，曝光要留出读出/传输余量，否则会出现
   # MV_CC_GetImageBuffer fail (0x80000007 = MV_E_NODATA，取流超时)。
   # 想要更长曝光就把 acquisition_frame_rate 降到 150~200（检测本来只跑 ~100fps，
   # 降帧不影响性能），那时这里可以放回 3500。
   exposure_max: 3000.0
+  # 自动曝光的调节周期 ms
   control_interval_ms: 300
 
 
+# 装甲板检测：网络推理 + 传统 CV 兜底
 armor_detector:
+  # 每帧最多送进网络的候选区域数
   max_infer_num: 5
+  # 推理后端：openvino / tensorrt
   backend: openvino
+  # 网络检测器通用参数
   net_detector:
+    # OpenVINO 后端参数
     openvino:
+      # 模型路径（onnx）
       model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
+      # 推理设备：CPU / GPU
       device_name: "CPU"
+      # 性能提示：THROUGHPUT（吞吐）/ LATENCY（延迟）
       perf_mode: "THROUGHPUT"
       # priority: "HIGH"   # OpenVINO 2025 CPU 插件不支持 MODEL_PRIORITY
       # scheduling_core_type: "PCORE_ONLY"
       execution_mode: "PERFORMANCE"
+      # 并行推理请求数（越大越吃内存）
       infer_request_buffer_num: 10
+    # TensorRT 后端参数（当前用不到）
     tensorrt:
+      # 模型路径
       model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
+      # CUDA context 副本数（多线程用）
       copy_context_num: 3
+      # 显存最低空闲比例
       min_free_mem_ratio: 0.1
+      # 是否用 CUDA 做预处理
       use_cuda_preproces: true
+    # 装甲板网络专用参数
     armor_infer:
+      # 模型类型：tup（含关键点+号码）
       model_type: tup
       # 0.2 -> 0.15：小陀螺单板斜对镜头时置信度会掉到 0.2 以下，导致检测占空比只有
       # ~24%（板不可见时跟踪只能靠预测）。降低阈值以提高检出率。
       conf_threshold: 0.2
+  # 数字分类器（MLP）：判定 1/2/哨兵/前哨等
   number_classifier:
+    # 是否启用数字分类
     enable: true
+    # 分类模型路径
     model_path: ${ROOT_DIR}/model/mlp.onnx
+    # 标签文件路径
     label_path: ${ROOT_DIR}/model/label.txt
+  # 红蓝颜色分类器
   color_classifier:
+    # 是否启用颜色分类
     enable: true
+    # 红蓝通道差阈值（区分敌我颜色）
     diff_threshold: 20.0
+  # 传统 CV 兜底检测参数
   cv:
+    # 灯条筛选参数
     light:
+      # 二值化阈值（0~255，越大只留亮部）
       bin_threshold: 120.0
+      # 与网络灯条参考亮度的容差
       net_ref_threshold_tol: 50.0
+      # 灯条最小宽高比
       min_wh_ratio: 0.001
+      # 灯条最大宽高比
       max_wh_ratio: 0.4
+      # 灯条最大倾角（度）
       max_angle: 40.0
+    # 装甲板配对参数
     armor:
+      # 两灯条间距/灯条长的最小比
       min_ratio: 0.8
+      # 两灯条间距/灯条长的最大比
       max_ratio: 5.0
 
 
+# 装甲板跟踪：ESEKF 状态估计 + 匹配 + 丢失/重锁
 armor_tracker:
+  # 多久收不到有效更新就判丢失 s
   lost_time_thres: 1.5
+  # 前哨站专用的丢失时间 s
   lost_time_thres_outpost: 2.0
+  # 连续成功更新多少次才进入 TRACKING
   tracking_thres: 1
   # DETECTING 期间允许连续几次漏检再判丢失（0 = 旧行为，一帧不中就丢）
   detecting_miss_tol: 3
   # 检到板子但连续这么久更新不上（匹配全被门限拒/预测偏了），就把该检测当新目标重新
   # 初始化，不等 lost_time_thres(1.5s)。否则预测框/车坐标系会钉在原地不动。
   # 0.3 -> 0.5：0.3s 内更新不上就推倒重来太急，容易进入"重锁→状态更差→更难匹配"循环。
-  relock_time_thres: 0.5
+  # 当前 0 = 关闭这条“更新不上就推倒重来”的判定（不重锁，靠 lost_time_thres 兜底）
+  relock_time_thres: 0
   # 【车心高度软先验】板中心相对云台俯仰轴的高度（m）。云台装得高，板比云台低约 20cm。
   # 单板 PnP 估的高度偏低（实测收敛 -0.045，实际 -0.20）且要 5~10s 才收敛 → 表现为
   # "锁上先瞄低、然后慢慢往上抬"。这条软约束把 CZ 往先验拉（tau 秒时间常数）。
@@ -193,35 +265,58 @@ armor_tracker:
   # 几乎没被拉动），导致"锁上偏低约 5°、慢慢抬起来"。τ=0.8 时每秒拉约 1.3 个时间常数，
   # 1 秒内就能收敛到先验附近。先验值 = 物理实测（板比云台俯仰轴低 20cm）。
   car_z_prior_enable: true
+  # 车心高度软先验 m（板中心相对云台俯仰轴；实测约 -0.20）
   car_z_prior: -0.20
+  # 软先验时间常数 s（越小拉得越快、越大越信任观测）
   car_z_prior_tau: 0.8
   # 车心位置过程噪声：单板观测时若给太大（30），车心会被那块板的快速运动拖着走，
   # 导致车心高度/距离漂（实测 h=±2 m → solve_pitch 失败、match 代价上万）。
   # 降到 8：车心更稳，代价是真实快速平移的目标响应慢一点。
-  qxyz_common: [8.0, 8.0, 1.0]
-  qyaw_common: 30.0
+  qxyz_common: [50, 5.0, 0.8]
+  # 车体 yaw 角加速度方差（越大越灵活、也越抖）
+  qyaw_common: 20.0
+  # 前哨站车体系加速度方差（仅 OUTPOST 生效）
   qxyz_output: [1.0, 1.0, 1.0]
+  # 前哨站 yaw 角加速度方差（仅 OUTPOST 生效）
   qyaw_output: 0.01
+  # 半径 r 的过程噪声（极小=视为常量）
   q_r: 0.0000001
+  # 灯条长度 l 的过程噪声
   q_l: 0.0000001
+  # 高度 h 的过程噪声
   q_h: 0.0000001
+  # 车体 roll/pitch 的过程噪声
   q_wpr: 0.0000001
+  # 前哨站高度差 dz 的过程噪声
   q_outpost_dz: 0.0000001
+  # 是否用灯条配对做额外测量（噪声大，抖动时可关）
   enable_lights_measure: true
   # 300 -> 450：实测近距离自旋时'匹配代价 304.5'刚好被 300 拒掉 → 观测全丢 →
   # 触发重锁循环（那轮 26 次 init target）。放宽一点先看 init 次数是否下降。
   armor_match_gate: 450.0
+  # 未全部初始化时的匹配代价门限
   armor_match_gate_not_all_init: 1000.0
+  # 匹配代价：像素中心误差权重
   armor_match_w_center_err: 5.0
+  # 匹配代价：角度误差权重
   armor_match_w_angle_err: 10.0
+  # 匹配代价：边长误差权重
   armor_match_w_side_length_err: 1.0
+  # 灯条长度比门限
   light_match_length_ratio_gate: 0.2
+  # 灯条角度差门限
   light_match_angle_gate: 0.2
+  # 灯条位置门限（按长度比缩放）
   light_match_pos_gate_by_length_ratio: 5.0
+  # 像素测量噪声（相对灯条长度比）
   r_sigma_px_by_length_ratio: 0.2
+  # 灯条长度测量噪声
   r_sigma_length_by_length_ratio: 0.5
+  # 角度测量噪声
   r_sigma_angle: 0.5
+  # 两条灯条深度差的测量噪声
   r_sigma_armor_lights_depth_diff: 0.1
+  # ESEKF 每帧迭代次数（越大越准、越慢）
   esekf_iter_num: 5
 
 
@@ -232,18 +327,29 @@ armor_tracker:
 
 
 
+# 自瞄状态机：单板 → 整车板 → 双板 → 车心（按 |vyaw| 切换）
 auto_aim_fsm:
+  # |vyaw| 超过此值(rad/s)持续 transfer_time 就切到整车板模式
   single_whole_up: 1.5 
+  # |vyaw| 低于此值持续 transfer_time 就切回单板模式
   single_whole_down: 1.0
+  # 整车板 → 双板 的 |vyaw| 阈值
   whole_pair_up: 7.5 
+  # 双板 → 整车板 的 |vyaw| 阈值
   whole_pair_down: 6.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
+  # 双板 → 车心 的 |vyaw| 阈值
   pair_center_up: 16.5
+  # 车心 → 双板 的 |vyaw| 阈值
   pair_center_down: 15.0
+  # 阈值需持续多久才真正切换 s（防抖）
   transfer_time: 0.5
 
 
+# 瞄准器：弹道解算 + MPC/轨迹规划 + 开火门限
 very_aimer:
-  type: mpc
+  # 控制方式：mpc=MPC 平滑轨迹（当前）；其它值=直发瞄准角
+  type: mpc  #mpc aim
+  # yaw 静态偏置（度，机械/外参残余）
   base_yaw_offset: -0.5
   # 【重标】相机/枪管几何已按实测修正（相机比枪管高 5cm），所以这里的偏置清零，
   # 只用它补偿"纯机械/弹道"的静态偏差。重标办法：2m 打固定靶，量落点相对板中心
@@ -253,9 +359,12 @@ very_aimer:
   # base_pitch_offset: -0.0
   sample_total_time: 1.0
   
+  # 规划器采样点数（dt = sample_total_time/horizon）
   sample_horizon: 200
 
+  # 开火延时下限 s（补偿曝光→击发链路）
   fire_delay_min: 0.03
+  # 开火延时上限 s
   fire_delay_max: 0.05
   
   # MPC 轨迹的角加速度上限：板子移动/换板时瞄准点在俯仰上会有 ±2~3° 的变化，
@@ -263,6 +372,7 @@ very_aimer:
   # 表现就是"装甲板运动时瞄准点跑到中心上面"）。放宽到 100/150 让它追得上；
   # 如果云台开始"咣咣"地抖，说明给太大，往下调。
   max_yaw_acc: 50
+  # MPC 俯仰角加速度上限 °/s²（越小越平滑、追得越慢）
   max_pitch_acc: 80
   
 
@@ -271,13 +381,19 @@ very_aimer:
   # 整条链路（曝光→推理→串口→云台响应）有百毫秒级延迟，小陀螺时按飞行时间瞄
   # 永远落在板子后面，所以这里额外补一段。0.10 → 总提前量约 0.19s；嫌大就调小，
   # 完全按物理弹道瞄就设回 0.00。
-  prediction_delay: 0.00 ##########################################################################
+  prediction_delay:   0.00
+  # 瞄车心（AIM_WHOLE_CAR_CENTER）时额外的超前时间 s
   aim_center_more_prediction_time: 0.0
 
+  # 装甲板高度 m（用于开火角门限）
   shooting_range_h: 0.12
+  # 小装甲板宽度 m
   shooting_range_w_small: 0.12
+  # 大装甲板宽度 m
   shooting_range_w_large: 0.24
+  # 允许开火的最小俯仰误差（度，越小越严）
   min_enable_pitch_deg: 0.25
+  # 允许开火的最小 yaw 误差（度）
   min_enable_yaw_deg: 0.25
   # 【开火实际角门限】|理想瞄准角 - 云台IMU实际角| 超过这个值就不允许开火（度，0=关闭）。
   # 原判据只比“理想 vs 规划器”（内部差 ~0.01°，恒真），云台没跟上也会开火：实测开火帧里
@@ -296,7 +412,9 @@ very_aimer:
   # 而状态里的板高会漂到 +0.05~+0.2 → 两者不一致 → 瞄准整体偏低约 2~3° →
   # 目标从画面上沿溜走、gt 锁不住（58 次 init target）。所以先关掉。
   ballistic_h_const_enable: false
+  # 弹道高度常数 m（0=关闭；仅实验用）
   ballistic_h_const: 0.00
+  # 是否打印弹道高度常数标定日志
   ballistic_h_const_log: false
   # 【俯仰符号 —— 结论：必须用 +1，别改成 -1】
   # 离线自检确实发现 rpy2matrix(Ry) 的正 pitch 让 +X 朝下，即"填 +α = 压 α"（内部不一致）。
@@ -311,111 +429,201 @@ very_aimer:
   # 4 块板物理等高，但模型里高度不一致（车体倾斜/H 不可观，极差 ~0.1m≈4°），
   # 超前量会把瞄准点换到下一块板 → 瞄准点整体偏低/偏高（实测自旋时低 76px≈4°）。
   aim_z_from_observed: true
+  # 弹道模型参数（解算仰角用）
   ballistic_trajectory:
+    # 重力加速度 m/s²
     gravity: 9.8
+    # 空气阻力系数 k（越小越接近抛物线）
     resistance: 0.001
 
+# 能量机关（打符）检测：网络 + CV
 rune_detector:
+  # 每帧最多送网络的候选数
   max_infer_num: 2
+  # 推理后端：openvino / tensorrt
   backend: openvino
+  # 网络检测器通用参数
   net_detector:
+    # OpenVINO 后端参数
     openvino:
+      # 模型路径（cb_rune.onnx）
       model_path: ${ROOT_DIR}/model/cb_rune.onnx
+      # 推理设备：CPU / GPU
       device_name: "CPU"
+      # 性能提示：THROUGHPUT / LATENCY
       perf_mode: "THROUGHPUT"
       # priority: "HIGH"   # OpenVINO 2025 CPU 插件不支持 MODEL_PRIORITY
       # scheduling_core_type: "PCORE_ONLY"
       execution_mode: "PERFORMANCE"
+      # 并行推理请求数
       infer_request_buffer_num: 10
+    # TensorRT 后端参数（未使用）
     tensorrt:
+      # 模型路径
       model_path: ${ROOT_DIR}/model/cb_rune.onnx
+      # CUDA context 副本数
       copy_context_num: 3
+      # 显存最低空闲比例
       min_free_mem_ratio: 0.1
+      # 是否用 CUDA 预处理
       use_cuda_preproces: true
+    # 打符网络专用参数
     rune_infer:
+      # 模型类型：cb（含关键点）
       model_type: cb
+      # 置信度阈值
       conf_threshold: 0.2
+  # 打符的传统 CV 参数
   cv:
+    # 二值化阈值（0~255）
     bin_threshold: 70
+    # 红蓝通道差阈值
     color_diff_thresh: 10
+    # R 标最小面积（像素）
     rune_r_min_area: 1
+    # R 标最大面积
     rune_r_max_area: 999999999
+    # R 标长宽比容差
     rune_r_1x1ratio_tol: 0.7
+    # R 标最小填充率
     rune_r_fill_ratio_min: 0.1
+    # 扇叶最小面积
     rune_pan_min_area: 10
+    # 扇叶最大面积
     rune_pan_max_area: 99999999
+    # 扇叶聚类半径（像素）
     rune_pan_cluster_radius: 70
+    # 扇叶最大方形比
     rune_pan_max_square_ratio: 1.3
 
 
+# 打符跟踪：转动参数估计（ESEKF）
 rune_tracker:
+  # 丢失判定时间 s
   lost_time_thres: 2.0
+  # 进入 TRACKING 需要的连续更新次数
   tracking_thres: 10
+  # ESEKF 每帧迭代次数
   esekf_iter_num: 5
+  # 扇叶位置过程噪声 [x,y,z]
   q_xyz: [0.0001, 0.0001, 0.0001]
+  # yaw 过程噪声
   q_yaw: 0.1
+  # roll 过程噪声
   q_roll: 10.0
+  # 转动角度 a 的过程噪声
   q_a: 0.01
+  # 角速度 w 的过程噪声
   q_w: 0.01
+  # 时间常数 tau 的过程噪声
   q_tau: 0.01
+  # 匹配代价门限
   match_gate: 30.0
+  # 状态投票需要的票数
   voter_state_need_count: 50
+  # 模式投票需要的票数
   voter_mode_need_count: 20
+  # 大参数（转速）稳定持续时间 s
   big_args_continue_time: 1.0
+  # CV 像素测量噪声（相对手长比）
   r_sigma_pix_by_hand_length_ratio_cv: 0.05
+  # 网络像素测量噪声（相对手长比）
   r_sigma_pix_by_hand_length_ratio_net: 0.2
 
+# 打符瞄准：轨迹 + 开火门限
 rune_aimer:
+  # yaw 静态偏置（度）
   base_yaw_offset: 0.0
+  # pitch 静态偏置（度）
   base_pitch_offset: 0.0
+  # 轨迹总时长 s
   sample_total_time: 0.5
+  # 轨迹采样点数（dt = total/horizon）
   sample_horizon: 10
+  # 额外超前时间 s（负数=减少超前）
   prediction_delay: -0.00
+  # yaw 角加速度上限 °/s²
   max_yaw_acc: 40 
+  # 俯仰角加速度上限 °/s²
   max_pitch_acc: 50
+  # 扇叶高度 m（开火门限用）
   shooting_range_h: 0.12
+  # 扇叶宽度 m
   shooting_range_w: 0.12
+  # 允许开火的最小俯仰误差（度）
   min_enable_pitch_deg: 0.25
+  # 允许开火的最小 yaw 误差（度）
   min_enable_yaw_deg: 0.25
+  # 打符弹道参数
   ballistic_trajectory:
+    # 重力加速度 m/s²
     gravity: 9.8
+    # 空气阻力系数
     resistance: 0.001
 
 
+# 相机驱动配置（内参 + 采集参数）
 camera: 
+  # 相机类型：hik（海康）/ mv（迈德威视）
   type: hik
+  # 海康相机采集参数
   hik_camera:
     #target_sn: DA4973922 #海康2
     target_sn: 00J38611357 #海康1
+    # ADC 位深：Bits_8 / Bits_10 / Bits_12
     adc_bit_depth: Bits_8
+    # 像素格式：BayerRG8 / RGB8Packed 等
     pixel_format: BayerRG8 #RGB8Packed
+    # 软件水平翻转（与 flip 二选一）
     reverse_x: false
+    # 软件垂直翻转
     reverse_y: false
+    # 采集宽度（像素）
     width: 1280
+    # 采集高度（像素）
     height: 720
+    # ROI 是否自动居中（true 时下面 offset 无效）
     center_roi: true    # OffsetX/OffsetY 按 WidthMax/HeightMax 自动居中，不写死
+    # ROI 左上角 x（center_roi=false 时生效）
     offset_x: 0         # 仅 center_roi=false 时生效
+    # ROI 左上角 y
     offset_y: 0
+    # 倒装补偿：none / vertical / horizontal / 180
     flip: "180"         # 相机倒装补偿：none/vertical/horizontal/180，识别前软件翻转
+    # 是否启用固定采集帧率
     acquisition_frame_rate_enable: true
     # 180 fps → 每帧 5.56ms；配合 auto_exposure.exposure_max=3000µs 留出 2.5ms
     # 余量，避免 MV_CC_GetImageBuffer fail (MV_E_NODATA，取流超时)。
     # 检测侧本来就只跑 ~100fps，180 对性能没有影响。
     # 若相机 USB 复位/掉线变频繁，可降到 120 应急（166MB/s -> 110MB/s）。
     acquisition_frame_rate: 180
+    # 固定曝光 µs（自动曝光关闭时用）
     exposure_time: 2000
+    # 模拟增益 dB（越大越亮、噪声越大）
     gain: 16.9 #16.9
+    # Gamma（仅 RGB 格式有效）
     gamma: 0.7 #Bayer用不了
+    # 触发模式：Off=自由运行；On=外部触发
     trigger_mode: Off
+    # 触发源（Line0 等，trigger_mode=On 时用）
     trigger_source: ""
+    # 触发沿：RisingEdge / FallingEdge
     trigger_activation: ""
+    # 输出格式：bgr / rgb / gray
     format: "bgr" 
+    # 是否用 CUDA 做格式转换（无 GPU 时无效）
     use_cuda_cvt: true
+  # 迈德威视相机采集参数
   mv_camera:
+    # 帧率设置（0=自动）
     frame_speed: 0
+    # 曝光 µs
     exposure_time: 2000
+    # 红通道增益
     r_gain: 200
+    # 蓝通道增益
     b_gain: 150
+    # 绿通道增益
     g_gain: 200
     # analog_gain: 100.0
     # gamma: 120
@@ -450,10 +658,15 @@ camera:
     #6mm
 
     image_width: 1280
+    # 标定图像高度（必须与实际采集一致）
     image_height: 720
+    # 相机名（ROS 消息里的名称）
     camera_name: narrow_stereo
+    # 内参矩阵 K：[fx,0,cx / 0,fy,cy / 0,0,1]
     camera_matrix:
+      # 矩阵行数（3）
       rows: 3
+      # 矩阵列数（3）
       cols: 3
       # data: [1796.894429809793,    0.     ,  620.0261636808025,
       #           0.     , 1796.931221518718,  379.0978347802621,
@@ -461,20 +674,33 @@ camera:
       data: [1796.894429809793,    0.     ,  658.0261636808025,
                 0.     , 1796.931221518718,  379.0978347802621,
                 0.     ,    0.     ,    1.     ]
+    # 畸变模型：plumb_bob / rational_polynomial
     distortion_model: plumb_bob
+    # 畸变系数 k1,k2,p1,p2,k3
     distortion_coefficients:
+      # 行数（1）
       rows: 1
+      # 列数（5）
       cols: 5
+      # 畸变系数值（顺序 k1,k2,p1,p2,k3）
       data: [-0.08924019639253641, 0.3763627652210577, -0.000139574350781996, -0.001426088285025369, -1.627646070279677]
+    # 校正矩阵（单目恒为单位阵）
     rectification_matrix:
+      # 行数（3）
       rows: 3
+      # 列数（3）
       cols: 3
+      # 校正矩阵元素（单位阵）
       data: [1., 0., 0.,
             0., 1., 0.,
             0., 0., 1.]
+    # 投影矩阵 P（ROS 相机模型用）
     projection_matrix:
+      # 行数（3）
       rows: 3
+      # 列数（4）
       cols: 4
+      # 投影矩阵元素（fx,0,cx,0 / 0,fy,cy,0 / 0,0,1,0）
       data: [1796.894429809793,    0.     ,  620.0261636808025,    0.     ,
                 0.     , 1796.931221518718,  379.0978347802621,    0.     ,
                 0.     ,    0.     ,    1.     ,    0.     ]
