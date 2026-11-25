@@ -37,8 +37,8 @@ struct VeryAimer::Impl {
         bool ballistic_h_const_log = false;
         // 【俯仰符号】solve_pitch 返回物理仰角(正=上)，但 rpy2matrix 用的是标准 Ry(pitch)，
         // 正 pitch 让 +X 朝下 → 直接把 α 填进去会让枪管压低 α。这里取负修正。
-        // 实测（2026-11-21）：-1 会让固定靶 pitch 一路往下跑并发散 → 不能用；
-        // 实际生效值是配置里的 ballistic_pitch_sign: +1.0（代码默认 -1 仅在配置缺键时生效）。
+        // 2026-11-25 实车最终结论：必须取负(-1)，并且【同时】把发布出去的 pitch 也取负
+        // （nav_pitch_sign: -1），两个成对才正确；只改一个会落点偏低/云台反向跑。
         double ballistic_pitch_sign = -1.0;
         // 【pitch 用观测射线】true = 弹道解算的"高度"取『检测像素方向』而不是模型的板高。
         // 模型里板高/tilt 本质不可观（实测静目标板高乱跳 ±10cm、四块板极差 0.22m），

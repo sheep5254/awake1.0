@@ -214,6 +214,29 @@ float  operator_yaw_offset, operator_pitch_offset
 
 ---
 
+## 3.5 ⚠️ pitch 符号：**两处必须成对取负**（2026-11-25 实车验证）
+
+这是踩了最久的一个坑，复刻时务必照抄：
+
+| 位置 | 参数 | 正确值 | 作用 |
+|---|---|---|---|
+| 视觉内部（`very_aimer`） | `ballistic_pitch_sign` | **-1.0** | 弹道仰角 α 进 `rpy2matrix` 时取负 |
+| 视觉发布端（`standard.cpp`） | `nav_pitch_sign` | **-1.0** | 发出去的 pitch 增量再取负 |
+
+**只改一个的后果**：
+- 只改 `ballistic_pitch_sign` → 落点偏低（约 2α·d：1.2 m 低 2.7 cm、3 m 低 17 cm）
+- 只改 `nav_pitch_sign` → 闭环变正反馈，云台朝反方向跑
+- **两个都改 → 实车验证正常**
+
+**原因**：`solve_pitch()` 返回的 α 是"物理仰角（向上为正）"，而 `rpy2matrix`/`matrix2rpy`
+用的是"向上为负"的约定；发布端既要满足这个约定、又要与下位机的增量方向一致，
+因此需要两次取负。
+
+**验证方法**：固定靶 1.2 m 打 3 发，落点应居中（改动前会低 2~3 cm）；
+3 m 处改动前后差异约 17 cm，最容易判断。
+
+---
+
 ## 4. 导航侧（nav）应实现的契约
 
 如果另写 nav，最小实现如下（参考 `standard_robot_pp_ros2`）：
