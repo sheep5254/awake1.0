@@ -277,6 +277,9 @@ int main(int argc, char** argv) {
             config["nav_gimbal_units"] ? config["nav_gimbal_units"].as<std::string>() : "rad";
         return units == "deg";
     }();
+    // 【发布 pitch 的符号】+1 = 原样；-1 = 把发出去的 pitch 取反（实验用）
+    const double nav_pitch_sign =
+        config["nav_pitch_sign"] ? config["nav_pitch_sign"].as<double>() : 1.0;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr gimbal_cmd_pub;
     rclcpp::Publisher<example_interfaces::msg::UInt8>::SharedPtr shoot_cmd_pub;
     rclcpp::Publisher<auto_aim_interfaces::msg::Target>::SharedPtr target_pub;
@@ -1569,10 +1572,10 @@ int main(int argc, char** argv) {
                         double d_yaw = wrap180(cmd.yaw - cur_yaw_deg);
                         d_pitch = std::clamp(d_pitch, -MAX_STEP_DEG, MAX_STEP_DEG);
                         d_yaw = std::clamp(d_yaw, -MAX_STEP_DEG, MAX_STEP_DEG);
-                        pitch_cmd = to_nav_units(d_pitch);
+                        pitch_cmd = nav_pitch_sign * to_nav_units(d_pitch);
                         yaw_cmd = to_nav_units(d_yaw);
                     } else {
-                        pitch_cmd = angles::from_degrees(cmd.pitch);
+                        pitch_cmd = nav_pitch_sign * angles::from_degrees(cmd.pitch);
                         yaw_cmd = angles::from_degrees(cmd.yaw);
                     }
                     // 解算异常时宁可这一帧不发，也不要发 NaN 出去

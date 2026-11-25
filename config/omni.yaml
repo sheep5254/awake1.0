@@ -108,6 +108,9 @@ single_frame_publish_timeout: 0.3
 nav_gimbal_mode: delta
 # delta 模式下的单位：rad | deg（absolute 模式恒为 rad）
 nav_gimbal_units: rad
+# 【发布 pitch 的符号】+1 = 原样；-1 = 发出去的 pitch 取反（实验用，慎用）
+# ⚠️ 取反等于把闭环方向反过来：如果云台开始朝错误方向跑（远离目标），立刻改回 +1
+nav_pitch_sign: -1.0
 
 # 录屏（avi）开关，输出到 record/ 目录
 record:
