@@ -3,7 +3,7 @@ mode: auto_aim
 # 敌方颜色：red / blue（影响颜色分类与选板）
 enemy_color: red
 # 弹速 m/s，用于弹道下坠补偿；换弹/改枪后必须重测
-bullet_speed: 23.0
+bullet_speed: 21.0
 
 # 逐帧诊断记录（纯写文件，不影响任何处理逻辑）
 #   文件固定为 record/auto_aim/run.jsonl，**每次启动自瞄都会覆盖上一次的**。
@@ -120,13 +120,13 @@ tf:
   camera_in_gimbal:
     # 相机中心相对云台：前 6cm、无横向、**比枪管中心高 5cm**（实测，2026-11-21）。
     # 原来写的是 z=-0.08（低 8cm）→ 与实测差 13cm；1.21m 处约 6° 的落点偏差。
-    t: [0.14,0.05,0.0]
+    t: [0.00,0.00,0.05]
     # 相机相对云台的旋转（3x3 行优先；单位阵=光轴与枪管平行）
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
   # 枪口相对云台俯仰轴的位姿
   shoot_in_gimbal:
     # 枪口位置：[x 前, y 左, z 上]，单位 m
-    t: [0.2,0.0,0.0]
+    t: [0.0,0.0,0.0]
     # 枪口相对云台的旋转（3x3 行优先）
     R: [1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]
 # 轮式里程计 EKF（底盘速度 + 视觉位置融合，给导航用）
@@ -155,16 +155,16 @@ auto_exposure:
   # 目标灰度的允许误差（±，越小越敏感）
   tolerance: 3.0
   # 每次调节的粗调增益（越大越快、越容易振荡）
-  step_gain: 15.0
+  step_gain: 6.0
   # 反向回调时的最小步长（防来回振荡）
   decay_step: 1.0
   # 曝光时间下限 µs
-  exposure_min: 200.0
+  exposure_min: 1200.0
   # 250 fps → 每帧只有 4ms，曝光要留出读出/传输余量，否则会出现
   # MV_CC_GetImageBuffer fail (0x80000007 = MV_E_NODATA，取流超时)。
   # 想要更长曝光就把 acquisition_frame_rate 降到 150~200（检测本来只跑 ~100fps，
   # 降帧不影响性能），那时这里可以放回 3500。
-  exposure_max: 3500.0
+  exposure_max: 3000.0
   # 自动曝光的调节周期 ms
   control_interval_ms: 300
 
@@ -172,7 +172,7 @@ auto_exposure:
 # 装甲板检测：网络推理 + 传统 CV 兜底
 armor_detector:
   # 每帧最多送进网络的候选区域数
-  max_infer_num: 3
+  max_infer_num: 5
   # 推理后端：openvino / tensorrt
   backend: openvino
   # 网络检测器通用参数
@@ -256,7 +256,8 @@ armor_tracker:
   # 检到板子但连续这么久更新不上（匹配全被门限拒/预测偏了），就把该检测当新目标重新
   # 初始化，不等 lost_time_thres(1.5s)。否则预测框/车坐标系会钉在原地不动。
   # 0.3 -> 0.5：0.3s 内更新不上就推倒重来太急，容易进入"重锁→状态更差→更难匹配"循环。
-  # 当前 0 = 关闭这条“更新不上就推倒重来”的判定（不重锁，靠 lost_time_thres 兜底）
+  # 0.5 = 连续 0.5s 更新不上才推倒重来；填 0 会变成“每帧失败就重锁”
+  #（实测 0 时 60 秒 init 94 次，状态根本收敛不了）
   relock_time_thres: 0.5
   # 【车心高度软先验】板中心相对云台俯仰轴的高度（m）。云台装得高，板比云台低约 20cm。
   # 单板 PnP 估的高度偏低（实测收敛 -0.045，实际 -0.20）且要 5~10s 才收敛 → 表现为
@@ -272,9 +273,9 @@ armor_tracker:
   # 车心位置过程噪声：单板观测时若给太大（30），车心会被那块板的快速运动拖着走，
   # 导致车心高度/距离漂（实测 h=±2 m → solve_pitch 失败、match 代价上万）。
   # 降到 8：车心更稳，代价是真实快速平移的目标响应慢一点。
-  qxyz_common: [30.0, 30.0, 1.0]
+  qxyz_common: [50, 5.0, 0.8]
   # 车体 yaw 角加速度方差（越大越灵活、也越抖）
-  qyaw_common: 30.0
+  qyaw_common: 20.0
   # 前哨站车体系加速度方差（仅 OUTPOST 生效）
   qxyz_output: [1.0, 1.0, 1.0]
   # 前哨站 yaw 角加速度方差（仅 OUTPOST 生效）
@@ -293,7 +294,7 @@ armor_tracker:
   enable_lights_measure: true
   # 300 -> 450：实测近距离自旋时'匹配代价 304.5'刚好被 300 拒掉 → 观测全丢 →
   # 触发重锁循环（那轮 26 次 init target）。放宽一点先看 init 次数是否下降。
-  armor_match_gate: 300.0
+  armor_match_gate: 450.0
   # 未全部初始化时的匹配代价门限
   armor_match_gate_not_all_init: 1000.0
   # 匹配代价：像素中心误差权重
@@ -330,11 +331,11 @@ armor_tracker:
 # 自瞄状态机：单板 → 整车板 → 双板 → 车心（按 |vyaw| 切换）
 auto_aim_fsm:
   # |vyaw| 超过此值(rad/s)持续 transfer_time 就切到整车板模式
-  single_whole_up: 1.5
+  single_whole_up: 1.5 
   # |vyaw| 低于此值持续 transfer_time 就切回单板模式
   single_whole_down: 1.0
   # 整车板 → 双板 的 |vyaw| 阈值
-  whole_pair_up: 7.5
+  whole_pair_up: 7.5 
   # 双板 → 整车板 的 |vyaw| 阈值
   whole_pair_down: 6.5 #1s内至少换2次板子  2pi  否则轨迹规划无意义
   # 双板 → 车心 的 |vyaw| 阈值
@@ -354,7 +355,7 @@ very_aimer:
   # 【重标】相机/枪管几何已按实测修正（相机比枪管高 5cm），所以这里的偏置清零，
   # 只用它补偿"纯机械/弹道"的静态偏差。重标办法：2m 打固定靶，量落点相对板中心
   # 的竖直偏差 Δh，偏高 Δh → 本值 = -atan(Δh/2m)；再在 1.2m / 4m 各验证一发。
-  base_pitch_offset: -2.0
+  base_pitch_offset: 0.0
   # base_yaw_offset: -0.0
   # base_pitch_offset: -0.0
   sample_total_time: 1.0
@@ -365,15 +366,15 @@ very_aimer:
   # 开火延时下限 s（补偿曝光→击发链路）
   fire_delay_min: 0.03
   # 开火延时上限 s
-  fire_delay_max: 0.07
+  fire_delay_max: 0.05
   
   # MPC 轨迹的角加速度上限：板子移动/换板时瞄准点在俯仰上会有 ±2~3° 的变化，
   # 原来 40/50 太保守，轨迹跟不上就形成恒定滞后（实测：小陀螺时云台比瞄准点低 ~3°，
   # 表现就是"装甲板运动时瞄准点跑到中心上面"）。放宽到 100/150 让它追得上；
   # 如果云台开始"咣咣"地抖，说明给太大，往下调。
-  max_yaw_acc: 40
+  max_yaw_acc: 50
   # MPC 俯仰角加速度上限 °/s²（越小越平滑、追得越慢）
-  max_pitch_acc: 50
+  max_pitch_acc: 80
   
 
   # 【击发提前量补偿】在弹道飞行时间之外，再按这个时间预测装甲板位置（单位 s）。
@@ -381,7 +382,7 @@ very_aimer:
   # 整条链路（曝光→推理→串口→云台响应）有百毫秒级延迟，小陀螺时按飞行时间瞄
   # 永远落在板子后面，所以这里额外补一段。0.10 → 总提前量约 0.19s；嫌大就调小，
   # 完全按物理弹道瞄就设回 0.00。
-  prediction_delay: 0.00
+  prediction_delay:   0.00
   # 瞄车心（AIM_WHOLE_CAR_CENTER）时额外的超前时间 s
   aim_center_more_prediction_time: 0.0
 
@@ -533,9 +534,9 @@ rune_tracker:
 # 打符瞄准：轨迹 + 开火门限
 rune_aimer:
   # yaw 静态偏置（度）
-  base_yaw_offset: -0.0
+  base_yaw_offset: 0.0
   # pitch 静态偏置（度）
-  base_pitch_offset: -0.5
+  base_pitch_offset: 0.0
   # 轨迹总时长 s
   sample_total_time: 0.5
   # 轨迹采样点数（dt = total/horizon）
@@ -543,7 +544,7 @@ rune_aimer:
   # 额外超前时间 s（负数=减少超前）
   prediction_delay: -0.00
   # yaw 角加速度上限 °/s²
-  max_yaw_acc: 40
+  max_yaw_acc: 40 
   # 俯仰角加速度上限 °/s²
   max_pitch_acc: 50
   # 扇叶高度 m（开火门限用）
