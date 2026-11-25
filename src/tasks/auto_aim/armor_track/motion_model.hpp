@@ -202,11 +202,17 @@ struct Predict {
                 delta_rot << T(0), T(0), x0[idx::VYAW] * T(dt);
             }
 
+            // 【旋转预测：绕世界 z 轴，而不是车体自身的 z 轴】
+            //  右乘 R0·Rz(Δ) = 绕"车体那根歪掉的 z 轴"转 → 车体倾斜会跟着一起转，
+            //    于是四块板的**世界高度**随转角周期性起伏 ±r·sin(tilt)
+            //    （实测 tilt≈5~17° → 起伏 2~15cm，1.2m 处 2~7°），表现为自旋时 pitch 慢慢沉。
+            //  左乘 Rz(Δ)·R0 = 车整体绕世界竖直轴转（平地上的真实运动）→ 板的世界高度恒定；
+            //    倾斜**仍然保留**（四块板该不等高还是不等高），只是不再随旋转起伏。
             const Eigen::Matrix<T, 3, 3> R1 =
-                (utils::so3_exp(
+                (utils::so3_exp(delta_rot)
+                 * utils::so3_exp(
                      Eigen::Matrix<T, 3, 1>(x0[idx::C_ROT_X], x0[idx::C_ROT_Y], x0[idx::C_ROT_Z])
-                 )
-                 * utils::so3_exp(delta_rot))
+                 ))
                     .eval();
             auto rot_vec = utils::so3_log(R1);
             x1[idx::C_ROT_X] = rot_vec.x();
