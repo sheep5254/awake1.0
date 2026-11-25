@@ -174,9 +174,26 @@ struct ArmorTracker::Impl {
         if (!matched_armors.empty()) {
             auto& a0 = matched_armors.front();  // pair<板索引, Armor>
             const auto bb0 = a0.second.key_points.bounding_box();
-            target.dbg_match_u = (bb0.tl().x + bb0.br().x) * 0.5f;
-            target.dbg_match_v = (bb0.tl().y + bb0.br().y) * 0.5f;
+            const float bu = (bb0.tl().x + bb0.br().x) * 0.5f;
+            const float bv = (bb0.tl().y + bb0.br().y) * 0.5f;
+            target.dbg_match_u = bu;
+            target.dbg_match_v = bv;
             target.dbg_match_num = a0.first;  // 板索引 0..3（换板时这个会变）
+            // 【观测仰角】像素中心 → 相机系射线 → gimbal_odom → 仰角
+            if (!camera_info.camera_matrix.empty()) {
+                const double fx = camera_info.camera_matrix.at<double>(0, 0);
+                const double fy = camera_info.camera_matrix.at<double>(1, 1);
+                const double cx = camera_info.camera_matrix.at<double>(0, 2);
+                const double cy = camera_info.camera_matrix.at<double>(1, 2);
+                if (fx > 1e-6 && fy > 1e-6) {
+                    Vec3 ray((bu - cx) / fx, (bv - cy) / fy, 1.0);
+                    ray.normalize();
+                    const Vec3 dir_w = camera_cv_in_odom.linear() * ray;
+                    target.obs_elev_cam = std::atan2(dir_w.z(), std::hypot(dir_w.x(), dir_w.y()));
+                    target.obs_cam_z = camera_cv_in_odom.translation().z();
+                    target.obs_valid = true;
+                }
+            }
         }
         const double dt_prior = std::clamp(
             std::chrono::duration<double>(armors.timestamp - target.last_update).count(),

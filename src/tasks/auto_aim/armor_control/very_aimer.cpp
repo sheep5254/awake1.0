@@ -40,6 +40,11 @@ struct VeryAimer::Impl {
         // 实测（2026-11-21）：-1 会让固定靶 pitch 一路往下跑并发散 → 不能用；
         // 实际生效值是配置里的 ballistic_pitch_sign: +1.0（代码默认 -1 仅在配置缺键时生效）。
         double ballistic_pitch_sign = -1.0;
+        // 【pitch 用观测射线】true = 弹道解算的"高度"取『检测像素方向』而不是模型的板高。
+        // 模型里板高/tilt 本质不可观（实测静目标板高乱跳 ±10cm、四块板极差 0.22m），
+        // 用它算 pitch 会抖+下垂；像素方向实测稳定 ±0.2°。
+        // 注意：只替换"高度"分量，水平方向仍用模型（含超前量），所以不影响打提前量。
+        bool use_observed_pitch = false;
         // 瞄准点高度改用"当前可见那块板"的 z（而不是超前预测那块板的 z）
         bool aim_z_from_observed = false;
 
@@ -76,6 +81,9 @@ struct VeryAimer::Impl {
             ballistic_pitch_sign = config["ballistic_pitch_sign"]
                 ? config["ballistic_pitch_sign"].as<double>()
                 : -1.0;
+            use_observed_pitch = config["use_observed_pitch"]
+                ? config["use_observed_pitch"].as<bool>()
+                : false;
         }
     } params_;
     using MPCType = dta_utils::TinyMpcTrajectory;
@@ -200,6 +208,15 @@ struct VeryAimer::Impl {
         Vec3 ballistic_p = p;
         if (params_.ballistic_h_const_enable) {
             ballistic_p.z() = params_.ballistic_h_const;
+        }
+        // 【pitch 用观测射线】把"板中心相对枪口的高度"换成观测值：
+        //   tan(观测仰角) = (板高 - 相机高) / 水平距离
+        //   => 板高 - 枪口高 = (相机高 - 枪口高) + 水平距离 * tan(观测仰角)
+        // 水平方向（含超前量）仍用模型，所以打提前量不受影响。
+        if (params_.use_observed_pitch && obs_valid_) {
+            const double d_h = std::hypot(p.x(), p.y());
+            const double dz_cam_muzzle = obs_cam_z_ - shoot_in_gimbal_odom.translation().z();
+            ballistic_p.z() = dz_cam_muzzle + d_h * std::tan(obs_elev_cam_);
         }
         if (params_.ballistic_h_const_log) {
             static TimePoint last_log_tp {};
@@ -428,6 +445,10 @@ struct VeryAimer::Impl {
             last_time_ = now;
         }
         auto target = _target.fast_copy_without_ekf();
+        // 【观测仰角】从 tracker 带过来的本帧观测（像素方向）
+        obs_elev_cam_ = target.obs_elev_cam;
+        obs_cam_z_ = target.obs_cam_z;
+        obs_valid_ = target.obs_valid;
         target.set_target_state([&](armor_point_motion_model::State& state) {
             state.predict(now, target.target_number);
         });
@@ -876,6 +897,10 @@ struct VeryAimer::Impl {
     mutable int dbg_id_ = -1;
     mutable TimePoint dbg_tp_ {};
     mutable int dbg_ref_id_ = -1;
+    // 【观测仰角】本帧从 target 取来，供 get_control_point 使用
+    mutable double obs_elev_cam_ = 0.0;
+    mutable double obs_cam_z_ = 0.0;
+    mutable bool obs_valid_ = false;
     mutable double dbg_ref_z_ = 0.0;
     mutable double dbg_z_[4] = {0, 0, 0, 0};
     mutable double dbg_h_ = 0.0;

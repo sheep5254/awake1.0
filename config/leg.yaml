@@ -4,12 +4,22 @@ bullet_speed: 23.0
 
 serial:
   enable: true
-  device_name: /dev/ttyACM0 
+  device_name: /dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0
+  send_enable: false
   baud_rate: 115200
   char_size: 8
   read_buf_size: 4096
-serial_send_to_image_microseconds: -6000
+  send_protocol: 1
+  recv_protocol: 1
+  crc_mode: mcrf4xx
+serial_send_to_image_microseconds: -2500
 use_sim: false
+
+publish_to_nav: true
+publish_when_detecting: true
+single_frame_publish_timeout: 0.3
+nav_gimbal_mode: delta
+nav_gimbal_units: rad
 
 record:
  enable: false
@@ -43,13 +53,12 @@ auto_exposure:
 
 armor_detector:
   max_infer_num: 5
-  backend: tensorrt
+  backend: openvino
   net_detector:
     openvino:
       model_path: ${ROOT_DIR}/model/opt-1208-001.onnx
       device_name: "CPU"
       perf_mode: "THROUGHPUT"
-      priority: "HIGH"
       # scheduling_core_type: "PCORE_ONLY"
       execution_mode: "PERFORMANCE"
       infer_request_buffer_num: 10
@@ -142,13 +151,12 @@ very_aimer:
 
 rune_detector:
   max_infer_num: 5
-  backend: tensorrt
+  backend: openvino
   net_detector:
     openvino:
       model_path: ${ROOT_DIR}/model/cb_rune.onnx
       device_name: "CPU"
       perf_mode: "THROUGHPUT"
-      priority: "HIGH"
       # scheduling_core_type: "PCORE_ONLY"
       execution_mode: "PERFORMANCE"
       infer_request_buffer_num: 10
@@ -209,11 +217,11 @@ rune_aimer:
 camera: 
   type: hik
   hik_camera:
-    target_sn: DA2166465
+    target_sn: 00J38611357
     adc_bit_depth: Bits_8
     pixel_format: BayerRG8 #RGB8Packed
-    reverse_x: false
-    reverse_y: false
+    reverse_x: true
+    reverse_y: true
     width: 1440
     height: 1080
     offset_x: 0

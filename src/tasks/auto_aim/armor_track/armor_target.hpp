@@ -209,6 +209,11 @@ public:
     float dbg_match_u = -1.0f;
     float dbg_match_v = -1.0f;
     int dbg_match_num = -1;
+    // 【观测仰角】本帧匹配到那块板，其检测像素中心方向（gimbal_odom 系）的仰角(rad)，
+    // 以及当时相机光心的高度(m)。给"pitch 用观测射线"的开关用。
+    double obs_elev_cam = 0.0;
+    double obs_cam_z = 0.0;
+    bool obs_valid = false;
     std::optional<std::pair<bool, std::vector<bool>>> outpost_has_all_and_has_set_ids;
     TrackState track_state;
     TimePoint last_update;
@@ -228,6 +233,9 @@ public:
         target.dbg_match_u = this->dbg_match_u;
         target.dbg_match_v = this->dbg_match_v;
         target.dbg_match_num = this->dbg_match_num;
+        target.obs_elev_cam = this->obs_elev_cam;
+        target.obs_cam_z = this->obs_cam_z;
+        target.obs_valid = this->obs_valid;
         target.outpost_has_all_and_has_set_ids = this->outpost_has_all_and_has_set_ids;
         target.this_id = this->this_id;
         target.update_count = this->update_count;

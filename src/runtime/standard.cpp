@@ -215,14 +215,19 @@ int main(int argc, char** argv) {
     // 【诊断】最终控制点的弹道对比日志：异步写盘 + 上限 20Hz，不影响主流程。
     // 列：t_ms,pz,d,alpha_deg,atan(pz,d)_deg,cmd_pitch,target_pitch,act_pitch,
     //     cmd_yaw,vyaw,cz,appear,fire,state
-    // 供诊断日志用：最新一帧检测到的装甲板像素中心（由 track 分支写入）
-    std::atomic<float> diag_det_u { -1.0f };
-    std::atomic<float> diag_det_v { -1.0f };
-    std::atomic<double> diag_obs_pixel_elev { 0.0 };  // 观测 LOS(像素射线, 世界系仰角)
-    std::atomic<int> diag_det_num { -1 };             // 被匹配板的号码（ArmorClass）
-    std::atomic<float> diag_pred_u { -1.0f };         // 该板模型位置投影到图像的像素
-    std::atomic<float> diag_pred_v { -1.0f };
-    std::atomic<double> diag_img_age_ms { 0.0 };      // 图像时刻→解算时刻
+    struct PixelDiagSnapshot {
+        uint64_t seq = 0;
+        int64_t frame_ns = 0;
+        bool valid = false;
+        float det_u = -1.0f;
+        float det_v = -1.0f;
+        int plate_id = -1;
+        double obs_pixel_elev = 0.0;
+        float pred_u = -1.0f;
+        float pred_v = -1.0f;
+    };
+    std::mutex pixel_diag_mutex;
+    PixelDiagSnapshot pixel_diag;
     const bool diag_log_enable = config["diag_log"] && config["diag_log"]["enable"]
         ? config["diag_log"]["enable"].as<bool>()
         : false;
@@ -231,7 +236,7 @@ int main(int argc, char** argv) {
         record::diag_logger().open(diag_path, true);
         AWAKENING_INFO("diag log enabled: {} (<=20Hz, 异步)", diag_path);
         record::diag_logger().push(
-            "t_ms,pz,d,alpha_deg,atan_pz_d_deg,cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state,det_u,det_v,act_roll,act_fwd_elev,dbg_valid,dbg_age_ms,dbg_aim_id,obs_pixel_elev,img_age_ms,det_plate_id,pred_u,pred_v,ref_id,ref_z,z0,z1,z2,z3,H,car_roll,car_pitch,d_pitch_sent,d_pitch_pub"
+            "t_ms,pz,d,alpha_deg,atan_pz_d_deg,cmd_pitch,target_pitch,act_pitch,cmd_yaw,vyaw,cz,appear,fire,state,det_u,det_v,act_roll,act_fwd_elev,dbg_valid,dbg_age_ms,dbg_aim_id,obs_pixel_elev,img_age_ms,det_plate_id,pred_u,pred_v,ref_id,ref_z,z0,z1,z2,z3,H,car_roll,car_pitch,d_pitch_sent,d_pitch_pub,pixel_valid,pixel_seq,pixel_frame_age_ms,pixel_dy"
         );
     }
     Scheduler s;
@@ -876,13 +881,19 @@ int main(int argc, char** argv) {
                 armors.frame_id = std::to_underlying(SimpleFrame::ODOM);
                 auto __armor_target =
                     armor_tracker.track(armors, camera_info, camera_cv_in_odom, armors.frame_id);
-                // 诊断用：取"被跟踪器匹配上"的那块板（绑定板编号），而不是面积最大的检测框
+                // Keep the observed and projected pixels from one matched image frame together.
+                PixelDiagSnapshot pixel_snapshot;
+                pixel_snapshot.frame_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                              armors.timestamp.time_since_epoch()
+                )
+                                              .count();
                 if (__armor_target.dbg_match_u >= 0.0f) {
                     const float bu = __armor_target.dbg_match_u;
                     const float bv = __armor_target.dbg_match_v;
-                    diag_det_u.store(bu);
-                    diag_det_v.store(bv);
-                    diag_det_num.store(__armor_target.dbg_match_num);
+                    pixel_snapshot.valid = true;
+                    pixel_snapshot.det_u = bu;
+                    pixel_snapshot.det_v = bv;
+                    pixel_snapshot.plate_id = __armor_target.dbg_match_num;
                     // 观测 LOS：像素中心 + 内参 → 相机系射线 → 曝光时刻相机姿态 → 世界系仰角
                     if (!camera_info.camera_matrix.empty()) {
                         const double fx_k = camera_info.camera_matrix.at<double>(0, 0);
@@ -893,16 +904,11 @@ int main(int argc, char** argv) {
                             Vec3 ray((bu - cx_k) / fx_k, (bv - cy_k) / fy_k, 1.0);
                             ray.normalize();
                             const Vec3 dir_w = camera_cv_in_odom.linear() * ray;
-                            diag_obs_pixel_elev.store(angles::to_degrees(
+                            pixel_snapshot.obs_pixel_elev = angles::to_degrees(
                                 std::atan2(dir_w.z(), std::hypot(dir_w.x(), dir_w.y()))
-                            ));
+                            );
                         }
                     }
-                    diag_img_age_ms.store(
-                        std::chrono::duration<double, std::milli>(
-                            Clock::now() - armors.timestamp
-                        ).count()
-                    );
                     // 模型侧的同一块板：把它的模型位置投影回图像，与上面的检测像素比较
                     if (__armor_target.is_inited && __armor_target.dbg_match_num >= 0
                         && !camera_info.camera_matrix.empty())
@@ -919,15 +925,18 @@ int main(int argc, char** argv) {
                                 const double fy_k = camera_info.camera_matrix.at<double>(1, 1);
                                 const double cx_k = camera_info.camera_matrix.at<double>(0, 2);
                                 const double cy_k = camera_info.camera_matrix.at<double>(1, 2);
-                                diag_pred_u.store(
-                                    static_cast<float>(fx_k * pc.x() / pc.z() + cx_k)
-                                );
-                                diag_pred_v.store(
-                                    static_cast<float>(fy_k * pc.y() / pc.z() + cy_k)
-                                );
+                                pixel_snapshot.pred_u =
+                                    static_cast<float>(fx_k * pc.x() / pc.z() + cx_k);
+                                pixel_snapshot.pred_v =
+                                    static_cast<float>(fy_k * pc.y() / pc.z() + cy_k);
                             }
                         }
                     }
+                }
+                {
+                    std::lock_guard<std::mutex> pixel_lock(pixel_diag_mutex);
+                    pixel_snapshot.seq = pixel_diag.seq + 1;
+                    pixel_diag = pixel_snapshot;
                 }
 #ifdef USE_ROS2
                 if (publish_to_nav) {
@@ -1347,6 +1356,21 @@ int main(int argc, char** argv) {
                 || now_diag - last_diag >= std::chrono::milliseconds(50))
             {
                 last_diag = now_diag;
+                PixelDiagSnapshot pixel_snapshot;
+                {
+                    std::lock_guard<std::mutex> pixel_lock(pixel_diag_mutex);
+                    pixel_snapshot = pixel_diag;
+                }
+                const double pixel_frame_age_ms = pixel_snapshot.frame_ns > 0
+                    ? std::chrono::duration<double, std::milli>(
+                          now_diag.time_since_epoch()
+                          - std::chrono::nanoseconds(pixel_snapshot.frame_ns)
+                      )
+                          .count()
+                    : 0.0;
+                const double pixel_dy = pixel_snapshot.valid && pixel_snapshot.pred_v >= 0.0f
+                    ? pixel_snapshot.pred_v - pixel_snapshot.det_v
+                    : 0.0;
                 const auto cur_rpy_diag = utils::matrix2rpy<double>(
                     gimbal_in_gimbal_odom.linear(), utils::RPYOrder::ZYX
                 );
@@ -1367,11 +1391,11 @@ int main(int argc, char** argv) {
                     cmd.pitch - angles::to_degrees(cur_rpy_diag[1]), -kMaxStepDeg, kMaxStepDeg);
                 const double d_pub =
                     nav_gimbal_units_deg ? d_sent_deg : angles::from_degrees(d_sent_deg);
-                char line[512];
+                char line[640];
                 std::snprintf(
                     line,
                     sizeof(line),
-                    "%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%d,%d,%s,%.1f,%.1f,%.2f,%.2f,%d,%.1f,%d,%.3f,%.1f,%d,%.1f,%.1f,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.3f,%.2f,%.3f,%.5f",
+                    "%.3f,%.4f,%.4f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%d,%d,%s,%.1f,%.1f,%.2f,%.2f,%d,%.1f,%d,%.3f,%.1f,%d,%.1f,%.1f,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.3f,%.2f,%.3f,%.5f,%d,%llu,%.1f,%.1f",
                     std::chrono::duration<double, std::milli>(now_diag.time_since_epoch()).count(),
                     cmd.dbg_pz,
                     cmd.dbg_d,
@@ -1386,8 +1410,8 @@ int main(int argc, char** argv) {
                     cmd.appear ? 1 : 0,
                     cmd.fire_advice ? 1 : 0,
                     state_diag.c_str(),
-                    static_cast<double>(diag_det_u.load()),
-                    static_cast<double>(diag_det_v.load()),
+                    static_cast<double>(pixel_snapshot.det_u),
+                    static_cast<double>(pixel_snapshot.det_v),
                     angles::to_degrees(cur_rpy_diag[0]),
                     angles::to_degrees(std::atan2(
                         gimbal_in_gimbal_odom.linear()(2, 0),
@@ -1396,11 +1420,11 @@ int main(int argc, char** argv) {
                     cmd.dbg_valid,
                     cmd.dbg_age_ms,
                     cmd.dbg_aim_id,
-                    diag_obs_pixel_elev.load(),
-                    diag_img_age_ms.load(),
-                    diag_det_num.load(),
-                    static_cast<double>(diag_pred_u.load()),
-                    static_cast<double>(diag_pred_v.load()),
+                    pixel_snapshot.obs_pixel_elev,
+                    pixel_frame_age_ms,
+                    pixel_snapshot.plate_id,
+                    static_cast<double>(pixel_snapshot.pred_u),
+                    static_cast<double>(pixel_snapshot.pred_v),
                     cmd.dbg_ref_id,
                     cmd.dbg_ref_z,
                     cmd.dbg_z[0],
@@ -1411,7 +1435,11 @@ int main(int argc, char** argv) {
                     cmd.dbg_car_roll,
                     cmd.dbg_car_pitch,
                     d_sent_deg,
-                    d_pub
+                    d_pub,
+                    pixel_snapshot.valid ? 1 : 0,
+                    static_cast<unsigned long long>(pixel_snapshot.seq),
+                    pixel_frame_age_ms,
+                    pixel_dy
                 );
                 record::diag_logger().push(line);
             }
